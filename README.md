@@ -1,26 +1,285 @@
-# JD Analyzer – Foundation Architecture
+# Job Apply Assist 🚀
 
-## Goal
-
-Build an AI-assisted Job Description (JD) Analyzer that:
-
-* Parses job descriptions
-* Extracts ATS keywords
-* Identifies role category
-* Detects missing skills
-* Suggests resume optimizations
-* Generates tailored resume variants later
+AI-powered ATS Optimization & Career Engineering Platform
 
 ---
 
-# Recommended Project Structure
+# Vision
+
+`job-apply-assist` is an AI-assisted career optimization system designed to help engineers and architects apply smarter — not harder.
+
+Instead of mass-applying with generic resumes, this platform focuses on:
+
+* Intelligent job filtering
+* ATS-aware resume tailoring
+* AI-assisted JD analysis
+* Resume generation
+* Application tracking
+* Callback optimization
+* Career analytics
+
+The long-term goal is to build a precision-driven application workflow powered by AI, automation, and engineering systems thinking.
+
+---
+
+# Problem Statement
+
+Modern hiring pipelines are heavily dependent on:
+
+* ATS (Applicant Tracking Systems)
+* Keyword matching
+* Recruiter skim-reading
+* Role-specific resume alignment
+
+Many technically strong candidates fail to receive callbacks because:
+
+* resumes are generic
+* ATS keywords are missing
+* experience is poorly aligned
+* recruiter readability is weak
+* applications are not optimized per role
+
+This project aims to solve that problem.
+
+---
+
+# High-Level Architecture
+
+```text
+Job Discovery
+     ↓
+JD Scraper
+     ↓
+AI Analyzer
+     ↓
+Resume Tailoring
+     ↓
+PDF Export
+     ↓
+Apply
+     ↓
+Outcome Tracking
+     ↓
+Analytics + Optimization
+```
+
+---
+
+# Core Workflow
+
+## 1. Intelligent Job Discovery
+
+Only relevant opportunities are targeted.
+
+Focus areas:
+
+* Product companies
+* Engineering-focused organizations
+* Cloud & Platform Engineering
+* DevOps
+* SRE
+* AI Infrastructure
+* Enterprise banking engineering teams
+
+Future integrations:
+
+* LinkedIn Alerts
+* Gmail parsing
+* RSS feeds
+* Company career portals
+* OpenClaw workflows
+
+---
+
+# 2. Job Description (JD) Analysis
+
+Input:
+
+* Job description text
+* Job posting URL
+
+The AI analyzer:
+
+* extracts ATS keywords
+* identifies role category
+* detects required skills
+* identifies certifications
+* highlights missing skills
+* generates recruiter-focused insights
+
+---
+
+# 3. ATS Optimization Engine
+
+The system compares:
+
+```text
+JD ↔ MASTER_RESUME.md
+```
+
+and generates:
+
+* ATS match score
+* keyword overlap analysis
+* missing skill analysis
+* recruiter confidence estimation
+* optimization suggestions
+
+Example:
+
+```text
+ATS Match Score: 84%
+
+Strong Areas:
+- Kubernetes
+- Terraform
+- GCP
+- Platform Engineering
+
+Missing Skills:
+- ArgoCD
+- Splunk
+```
+
+---
+
+# 4. Resume Tailoring Engine
+
+The system dynamically generates role-specific resumes based on:
+
+* Cloud Architect
+* Platform Engineer
+* DevOps Engineer
+* SRE
+* AI Infrastructure Engineer
+
+Generated resumes:
+
+* surface relevant experience
+* optimize ATS keyword density
+* improve recruiter readability
+* preserve technical authenticity
+
+---
+
+# 5. PDF Resume Generation
+
+Automatically generates recruiter-ready resumes:
+
+```text
+generated/google_platform_engineer_resume.pdf
+```
+
+Future enhancements:
+
+* multi-template support
+* recruiter-specific formatting
+* company-specific resume variants
+
+---
+
+# 6. Manual High-Quality Application Workflow
+
+This platform intentionally avoids:
+
+* mass spam applications
+* fake keyword stuffing
+* dishonest experience inflation
+
+Instead, the goal is:
+
+* targeted applications
+* ATS-aware optimization
+* recruiter-friendly resumes
+* precision application engineering
+
+---
+
+# 7. Outcome Tracking & Feedback Loop
+
+This is one of the most important components.
+
+The system tracks:
+
+* applications submitted
+* ATS score
+* resume version used
+* callbacks
+* rejections
+* interviews
+* recruiter interactions
+* response times
+
+Example:
+
+| Company   | Role              | ATS Score | Status    |
+| --------- | ----------------- | --------- | --------- |
+| Google    | Platform Engineer | 82%       | Rejected  |
+| JPMorgan  | Cloud Architect   | 91%       | Interview |
+| Atlassian | SRE               | 76%       | Pending   |
+
+---
+
+# 8. Analytics & Optimization Engine
+
+Over time, the system will identify:
+
+* which resume variants perform better
+* which ATS keywords correlate with callbacks
+* which companies respond positively
+* which role categories align best
+* callback-to-application ratios
+
+Long-term vision:
+
+```text
+AI-assisted career intelligence system
+```
+
+---
+
+# Tech Stack
+
+## AI & LLM
+
+* Ollama
+* Qwen2.5-Coder
+* Local LLM workflows
+
+## Backend
+
+* Python
+
+## Automation
+
+* OpenClaw
+* Shell scripting
+
+## Storage
+
+* Markdown
+* SQLite (planned)
+
+## Hosting
+
+* GitHub Pages
+
+## Resume Engineering
+
+* Markdown-based resumes
+* Git versioning
+* ATS optimization workflows
+
+---
+
+# Repository Structure
 
 ```text
 job-apply-assist/
 │
 ├── MASTER_RESUME.md
-├── requirements.txt
 ├── README.md
+├── requirements.txt
 │
 ├── docs/
 │
@@ -29,266 +288,76 @@ job-apply-assist/
 │   └── resume_tailor_prompt.txt
 │
 ├── job_descriptions/
-│   └── sample_jd.txt
 │
 ├── outputs/
-│   └── analysis_output.json
 │
 ├── scripts/
 │   ├── jd_analyzer.py
-│   ├── keyword_extractor.py
 │   ├── resume_tailor.py
+│   ├── ats_scorer.py
 │   └── pdf_export.py
 │
+├── generated/
+│
 └── variants/
-    ├── cloud_architect.md
-    ├── platform_engineer.md
-    ├── devops_engineer.md
-    └── ai_infra_engineer.md
 ```
 
 ---
 
-# Phase 1 – JD Analyzer
+# Strategic Goals
 
-## Input
+This project is designed to become:
 
-* Raw job description text
-
-## Output
-
-* Extracted keywords
-* Role category
-* ATS optimization suggestions
-* Missing skills analysis
-* Resume alignment suggestions
+* an ATS optimization platform
+* a resume engineering system
+* an AI-assisted job application pipeline
+* a career analytics engine
+* a portfolio-grade engineering project
 
 ---
 
-# Suggested AI Workflow
+# Long-Term Vision
+
+Future roadmap:
+
+* LinkedIn job ingestion
+* Gmail automation
+* OpenClaw integrations
+* Telegram notifications
+* AI-powered callback prediction
+* recruiter analytics
+* dashboard visualizations
+* autonomous opportunity discovery
+
+---
+
+# Philosophy
+
+This project is built around one core principle:
 
 ```text
-Job Description
-       ↓
-Keyword Extraction
-       ↓
-Role Classification
-       ↓
-Resume Gap Analysis
-       ↓
-Optimization Suggestions
+Apply smarter, not harder.
 ```
+
+The goal is not mass application spam.
+
+The goal is:
+
+* precision
+* optimization
+* authenticity
+* visibility
+* engineering-driven career growth
 
 ---
 
-# requirements.txt
+# Author
 
-```text
-requests
-rich
-python-dotenv
-```
+Harisankar
+Senior Cloud Architect | Platform Engineering | AI Infrastructure
 
----
+Portfolio:
+https://meeturglider.github.io
 
-# Initial Local LLM Integration
-
-We will use:
-
-```text
-Ollama
-```
-
-with:
-
-```text
-qwen2.5-coder:7b
-```
-
----
-
-# Ollama API Endpoint
-
-```text
-http://localhost:11434/api/generate
-```
-
----
-
-# scripts/jd_analyzer.py
-
-```python
-import json
-import requests
-from pathlib import Path
-from rich.console import Console
-from rich.panel import Panel
-
-console = Console()
-
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "qwen2.5-coder:7b"
-
-
-def load_jd(file_path: str):
-    return Path(file_path).read_text()
-
-
-def build_prompt(job_description: str):
-    return f"""
-You are an ATS and cloud engineering recruiter assistant.
-
-Analyze the following job description and return:
-
-1. Role Category
-2. Top Technical Skills
-3. ATS Keywords
-4. Required Certifications
-5. Missing Skill Recommendations
-6. Resume Optimization Suggestions
-
-Return response in clean markdown.
-
-JOB DESCRIPTION:
-
-{job_description}
-"""
-
-
-def query_ollama(prompt: str):
-    payload = {
-        "model": MODEL,
-        "prompt": prompt,
-        "stream": False
-    }
-
-    response = requests.post(OLLAMA_URL, json=payload)
-    response.raise_for_status()
-
-    return response.json()["response"]
-
-
-def save_output(output: str):
-    output_path = Path("outputs/analysis_output.md")
-    output_path.write_text(output)
-    return output_path
-
-
-def main():
-    console.print(Panel.fit("JD Analyzer Starting", style="bold cyan"))
-
-    jd_path = "job_descriptions/sample_jd.txt"
-
-    job_description = load_jd(jd_path)
-
-    console.print("[yellow]Building AI prompt...[/yellow]")
-    prompt = build_prompt(job_description)
-
-    console.print("[yellow]Querying Ollama model...[/yellow]")
-    result = query_ollama(prompt)
-
-    output_file = save_output(result)
-
-    console.print(Panel(result, title="ATS Analysis", style="green"))
-
-    console.print(f"\n[bold green]Saved output:[/bold green] {output_file}")
-
-
-if __name__ == "__main__":
-    main()
-```
-
----
-
-# Example Usage
-
-## Start Ollama
-
-```bash
-ollama ps
-```
-
----
-
-## Run Analyzer
-
-```bash
-python3 scripts/jd_analyzer.py
-```
-
----
-
-# Example Future Enhancements
-
-## Planned Features
-
-### Resume Tailoring
-
-```text
-JD → AI → Optimized Resume Variant
-```
-
----
-
-### ATS Match Scoring
-
-Example:
-
-```text
-Resume Match Score: 82%
-```
-
----
-
-### LinkedIn Job Parser
-
-Automatically:
-
-* parse LinkedIn alerts
-* classify jobs
-* rank relevance
-* notify via Telegram
-
----
-
-### OpenClaw Integration
-
-Future workflow:
-
-```text
-Email → OpenClaw → Telegram Reminder
-```
-
----
-
-# Recommended Workflow Going Forward
-
-## Daily Process
-
-```text
-1. Paste JD
-2. Run analyzer
-3. Review ATS suggestions
-4. Generate optimized resume variant
-5. Export PDF
-6. Apply
-7. Track response
-```
-
----
-
-# Strategic Goal
-
-Build a reusable:
-
-```text
-AI-Powered Career Engineering Platform
-```
-
-that continuously improves:
-
-* ATS visibility
-* recruiter alignment
-* callback rates
-* application efficiency
-* technical branding
+GitHub:
+https://github.com/meeturglider
