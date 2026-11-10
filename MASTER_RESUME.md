@@ -11,7 +11,7 @@
 
 # PROFESSIONAL SUMMARY
 
-Senior Cloud Architect with 14+ years of experience in Cloud Architecture, DevOps, Platform Engineering, Infrastructure Automation, Kubernetes, CI/CD, Cloud Security, and AI-driven operational transformation.
+Senior Cloud Architect with 16+ years of experience in Cloud Architecture, DevOps, Platform Engineering, Infrastructure Automation, Kubernetes, CI/CD, Cloud Security, and AI-driven operational transformation.
 
 Experienced in designing enterprise-scale cloud-native platforms using GCP, AWS, Kubernetes, Docker, Terraform, Linux automation, and Generative AI technologies including Vertex AI and Gemini Enterprise.
 
@@ -55,7 +55,9 @@ Strong engineering leader with expertise in infrastructure automation, operation
 
 * Vertex AI
 * Gemini Enterprise
-* Gemini 2.5 Flash
+* Gemini
+* Agent Harness
+* ADK
 * LLM Workflow Automation
 * AI Infrastructure
 * AI Operational Tooling
