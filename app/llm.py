@@ -2,16 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from typing import Any
 
 import httpx
+from pydantic import BaseModel, ValidationError
 
 from app.config import Settings
 
+logger = logging.getLogger(__name__)
+
 
 class LLMError(Exception):
-    pass
+    def __init__(self, message: str, *, retryable: bool = True, attempts: int = 0) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.attempts = attempts
 
 
 def _extract_json(value: str) -> dict[str, Any]:
@@ -37,6 +44,7 @@ def _extract_json(value: str) -> dict[str, Any]:
 class OllamaClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.last_attempts = 0
 
     @property
     def enabled(self) -> bool:
@@ -70,7 +78,7 @@ class OllamaClient:
         temperature: float = 0.1,
     ) -> str:
         if not self.enabled:
-            raise LLMError("LLM provider is disabled.")
+            raise LLMError("LLM provider is disabled.", retryable=False)
         payload: dict[str, Any] = {
             "model": self.settings.ollama_model,
             "messages": [
@@ -101,8 +109,13 @@ class OllamaClient:
         except (TimeoutError, httpx.TimeoutException) as exc:
             raise LLMError(
                 f"Ollama did not respond within {int(timeout)} seconds. "
-                "Try a smaller model or increase OLLAMA_TIMEOUT_SECONDS."
+                "Try a smaller model or increase OLLAMA_TIMEOUT_SECONDS.",
+                retryable=False,
             ) from exc
+        except httpx.HTTPStatusError as exc:
+            detail = str(exc) or type(exc).__name__
+            retryable = exc.response.status_code in {408, 429} or exc.response.status_code >= 500
+            raise LLMError(f"Ollama request failed: {detail}", retryable=retryable) from exc
         except httpx.HTTPError as exc:
             detail = str(exc) or type(exc).__name__
             raise LLMError(f"Ollama request failed: {detail}") from exc
@@ -117,6 +130,64 @@ class OllamaClient:
         prompt: str,
         *,
         temperature: float = 0.1,
+        schema: type[BaseModel] | None = None,
+        operation: str = "llm_json",
+        max_retries: int | None = None,
     ) -> dict[str, Any]:
-        content = await self.chat(system, prompt, json_mode=True, temperature=temperature)
-        return _extract_json(content)
+        retries = self.settings.ollama_max_retries if max_retries is None else max(0, max_retries)
+        attempts = 1 + min(retries, 3)
+        last_error: LLMError | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                content = await self.chat(
+                    system,
+                    prompt,
+                    json_mode=True,
+                    temperature=temperature,
+                )
+                data = _extract_json(content)
+                if schema is not None:
+                    try:
+                        data = schema.model_validate(data).model_dump()
+                    except ValidationError as exc:
+                        raise LLMError(
+                            f"The model returned JSON that did not match the expected schema: {exc}",
+                            retryable=True,
+                        ) from exc
+                self.last_attempts = attempt
+                logger.info(
+                    "llm_json_succeeded",
+                    extra={
+                        "operation": operation,
+                        "attempt": attempt,
+                        "model": self.settings.ollama_model,
+                    },
+                )
+                return data
+            except LLMError as exc:
+                exc.attempts = attempt
+                last_error = exc
+                self.last_attempts = attempt
+                retryable = exc.retryable and attempt < attempts
+                logger.warning(
+                    "llm_json_attempt_failed",
+                    extra={
+                        "operation": operation,
+                        "attempt": attempt,
+                        "max_attempts": attempts,
+                        "retryable": retryable,
+                        "error": str(exc),
+                        "model": self.settings.ollama_model,
+                    },
+                )
+                if not retryable:
+                    break
+                backoff = max(0.0, self.settings.ollama_retry_backoff_seconds) * attempt
+                if backoff:
+                    await asyncio.sleep(backoff)
+        error = last_error or LLMError("LLM JSON request failed.")
+        raise LLMError(
+            f"LLM JSON request failed after {error.attempts} attempt(s): {error}",
+            retryable=False,
+            attempts=error.attempts,
+        ) from error

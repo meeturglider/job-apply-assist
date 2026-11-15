@@ -144,6 +144,8 @@ class JobDescription(BaseModel):
     source_url: str = ""
     fetched_at: datetime = Field(default_factory=utc_now)
     extraction_method: str = "heuristic"
+    extraction_fallback_reason: str = ""
+    llm_attempts: int = 0
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -313,6 +315,8 @@ class ValidationReport(BaseModel):
     supported_claims: int = 0
     repaired: bool = False
     fallback_used: bool = False
+    fallback_reason: str = ""
+    llm_attempts: int = 0
 
 
 class AtsCheck(BaseModel):

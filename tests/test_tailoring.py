@@ -131,6 +131,7 @@ def test_builder_falls_back_when_llm_fails(profile: CandidateProfile) -> None:
     resume, report, method = asyncio.run(build_resume(profile, job, analysis, FailingLLM()))  # type: ignore[arg-type]
     assert method == "deterministic-fallback"
     assert report.fallback_used is True
+    assert report.fallback_reason.startswith("LLM tailoring failed")
     assert resume.header.name == profile.identity.name
 
 

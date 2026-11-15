@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from app.llm import OllamaClient
+from app.llm_schemas import LLMResumePlan
 from app.models import (
     AnalysisResult,
     CandidateProfile,
@@ -217,10 +218,14 @@ def _fallback(
     analysis: AnalysisResult,
     method: str,
     reason: str = "",
+    *,
+    llm_attempts: int = 0,
 ) -> tuple[TailoredResume, ValidationReport, str]:
     resume = deterministic_resume(profile, job, analysis)
     report = validate_resume(resume, profile, job)
     report.fallback_used = True
+    report.fallback_reason = reason
+    report.llm_attempts = llm_attempts
     if reason:
         from app.models import ValidationIssue
 
@@ -237,14 +242,27 @@ async def build_resume(
     llm: OllamaClient,
 ) -> tuple[TailoredResume, ValidationReport, str]:
     if not llm.enabled:
-        return _fallback(profile, job, analysis, "deterministic")
+        return _fallback(
+            profile,
+            job,
+            analysis,
+            "deterministic",
+            "LLM provider is disabled; deterministic selection was used.",
+        )
 
     prompt = (
         "Build the tailored resume from this JSON payload. Return only the JSON object.\n\n"
         + json.dumps(_profile_payload(profile, job, analysis), indent=2, ensure_ascii=False)
     )
     try:
-        data = await llm.json(load_prompt("resume_tailor.md"), prompt, temperature=0.15)
+        data = await llm.json(
+            load_prompt("resume_tailor.md"),
+            prompt,
+            temperature=0.15,
+            schema=LLMResumePlan,
+            operation="resume_tailor",
+        )
+        attempts = getattr(llm, "last_attempts", 1)
         resume = _resume_from_llm(data, profile, job, analysis)
     except Exception as exc:
         return _fallback(
@@ -253,14 +271,17 @@ async def build_resume(
             analysis,
             "deterministic-fallback",
             f"LLM tailoring failed; deterministic resume used. {exc}",
+            llm_attempts=getattr(exc, "attempts", 0),
         )
     report = validate_resume(resume, profile, job)
+    report.llm_attempts = attempts
     if report.valid:
         return resume, report, "llm"
 
     sanitized = sanitize_resume(resume, profile, job, analysis)
     sanitized_report = validate_resume(sanitized, profile, job)
     sanitized_report.repaired = True
+    sanitized_report.llm_attempts = attempts
     if sanitized_report.valid:
         return sanitized, sanitized_report, "llm-sanitized"
 
@@ -271,4 +292,5 @@ async def build_resume(
         analysis,
         "deterministic-fallback",
         "Generated resume failed truthfulness checks; deterministic resume used.",
+        llm_attempts=attempts,
     )

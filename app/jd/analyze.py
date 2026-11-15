@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.llm import OllamaClient
+from app.llm_schemas import LLMJobExtraction
 from app.matching.dimensions import classify_dimension
 from app.models import JobDescription, Requirement
 from app.prompts import load_prompt
@@ -420,6 +421,8 @@ async def analyze_job(
     warnings: list[str] = []
     method = "heuristic"
     llm_data: dict[str, Any] = {}
+    fallback_reason = ""
+    llm_attempts = 0
 
     if llm.enabled:
         prompt = (
@@ -432,9 +435,17 @@ async def analyze_job(
             "JD>>>"
         )
         try:
-            llm_data = await llm.json(load_prompt("jd_extract.md"), prompt)
+            llm_data = await llm.json(
+                load_prompt("jd_extract.md"),
+                prompt,
+                schema=LLMJobExtraction,
+                operation="jd_extract",
+            )
+            llm_attempts = getattr(llm, "last_attempts", 1)
             method = "llm"
         except Exception as exc:
+            fallback_reason = str(exc)
+            llm_attempts = getattr(exc, "attempts", 0)
             warnings.append(f"LLM extraction failed; using deterministic extraction. {exc}")
 
     must = _normalize_requirements(llm_data.get("must_have"), "must_have")
@@ -556,6 +567,8 @@ async def analyze_job(
         source_url=source_url,
         fetched_at=datetime.now(UTC),
         extraction_method=method,
+        extraction_fallback_reason=fallback_reason,
+        llm_attempts=llm_attempts,
         warnings=warnings,
     )
 
