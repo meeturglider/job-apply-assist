@@ -459,7 +459,9 @@ function renderValidation(validation) {
     container.appendChild(el("div", "muted", "Validation report unavailable."));
     return;
   }
-  if (validation.valid && (!validation.issues || !validation.issues.length)) {
+  const issues = validation.issues || [];
+  const reviewItems = validation.review_items || [];
+  if (validation.valid && !issues.length && !reviewItems.length) {
     const item = el("div", "check-item passed");
     item.appendChild(el("span", "check-icon", "✓"));
     const body = el("div");
@@ -469,13 +471,40 @@ function renderValidation(validation) {
     container.appendChild(item);
     return;
   }
-  validation.issues.forEach((issue) => {
+  if (reviewItems.length) {
+    const item = el("div", "check-item warning");
+    item.appendChild(el("span", "check-icon", "!"));
+    const body = el("div");
+    body.appendChild(el("span", "check-title", "Human review required"));
+    body.appendChild(
+      el(
+        "span",
+        "check-detail",
+        `${validation.checked_claims || 0} claims checked, ${validation.supported_claims || 0} supported. Review the items below before downloading.`,
+      ),
+    );
+    item.appendChild(body);
+    container.appendChild(item);
+  }
+  issues.forEach((issue) => {
     const warning = issue.severity === "warning";
     const item = el("div", `check-item ${warning ? "warning" : "failed"}`);
     item.appendChild(el("span", "check-icon", warning ? "!" : "×"));
     const body = el("div");
     body.appendChild(el("span", "check-title", issue.location));
     body.appendChild(el("span", "check-detail", issue.message));
+    item.appendChild(body);
+    container.appendChild(item);
+  });
+  reviewItems.forEach((review) => {
+    const item = el("div", "check-item warning");
+    item.appendChild(el("span", "check-icon", "?"));
+    const body = el("div");
+    body.appendChild(el("span", "check-title", `${review.location}: ${review.claim}`));
+    const detail = review.source
+      ? `${review.reason} Closest source: ${review.source}`
+      : review.reason;
+    body.appendChild(el("span", "check-detail", detail));
     item.appendChild(body);
     container.appendChild(item);
   });

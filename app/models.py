@@ -286,6 +286,20 @@ class ValidationIssue(BaseModel):
     severity: Literal["error", "warning"] = "error"
     location: str
     message: str
+    claim_type: str = ""
+    source: str = ""
+    evidence_text: str = ""
+    requires_review: bool = False
+
+
+class ReviewItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    location: str
+    claim: str
+    claim_type: str
+    reason: str
+    source: str = ""
 
 
 class ValidationReport(BaseModel):
@@ -293,6 +307,10 @@ class ValidationReport(BaseModel):
 
     valid: bool = True
     issues: list[ValidationIssue] = Field(default_factory=list)
+    review_required: bool = False
+    review_items: list[ReviewItem] = Field(default_factory=list)
+    checked_claims: int = 0
+    supported_claims: int = 0
     repaired: bool = False
     fallback_used: bool = False
 

@@ -72,6 +72,41 @@ def test_sanitizer_removes_unsupported_claims(profile: CandidateProfile) -> None
     assert all("99%" not in bullet for entry in cleaned.experience for bullet in entry.bullets)
 
 
+def test_validator_requires_review_for_untraceable_supported_bullet(
+    profile: CandidateProfile,
+) -> None:
+    job = _job()
+    resume = _resume(profile)
+    resume.summary = "Platform engineer focused on reliable cloud platforms."
+    resume.skills[0].items = ["Kubernetes", "Terraform"]
+    resume.experience[0].bullets = ["Kubernetes supports this system."]
+    report = validate_resume(resume, profile, job)
+    assert report.valid is True
+    assert report.review_required is True
+    assert report.review_items[0].claim == "Kubernetes supports this system."
+    assert report.review_items[0].claim_type == "traceability"
+
+
+def test_sanitizer_removes_unsupported_leadership_and_financial_claims(
+    profile: CandidateProfile,
+) -> None:
+    job = _job()
+    analysis = analyze_match(job, profile)
+    resume = _resume(profile)
+    resume.summary = "Platform engineer with 20 years of experience."
+    resume.skills[0].items = ["Kubernetes", "Terraform"]
+    resume.experience[0].bullets = [
+        "Built GCP landing zones with Terraform and Kubernetes.",
+        "Led a team of 20 and generated $50M revenue.",
+    ]
+    cleaned = sanitize_resume(resume, profile, job, analysis)
+    bullets = [bullet for entry in cleaned.experience for bullet in entry.bullets]
+    assert "20 years" not in cleaned.summary
+    assert all("team of 20" not in bullet for bullet in bullets)
+    assert all("$50M" not in bullet for bullet in bullets)
+    assert validate_resume(cleaned, profile, job).valid is True
+
+
 def test_sanitizer_caps_llm_bullet_volume(profile: CandidateProfile) -> None:
     job = _job()
     analysis = analyze_match(job, profile)

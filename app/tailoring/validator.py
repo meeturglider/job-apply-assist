@@ -8,12 +8,14 @@ from app.models import (
     JobDescription,
     ResumeExperience,
     ResumeProject,
+    ReviewItem,
     SkillGroup,
     TailoredResume,
     ValidationIssue,
     ValidationReport,
 )
 from app.skills import lexicon
+from app.tailoring.claims import check_claims
 from app.tailoring.selection import (
     deterministic_education,
     deterministic_projects,
@@ -26,26 +28,30 @@ from app.tailoring.selection import (
     select_bullets,
 )
 
-NUMBER_RE = re.compile(r"\b\d[\d,]*(?:\.\d+)?%?\+?")
-
-
-def _numbers(value: str) -> set[str]:
-    result: set[str] = set()
-    for match in NUMBER_RE.finditer(value):
-        token = match.group(0).replace(",", "").replace(" ", "")
-        if token:
-            result.add(token)
-    return result
-
 
 def _source_texts(profile: CandidateProfile) -> list[str]:
     texts = [profile.summary]
-    for entry in profile.experience:
-        texts.extend([entry.summary, *entry.bullets])
-    for project in profile.projects:
-        texts.extend([project.summary, *project.bullets])
-    for cert in profile.certifications:
-        texts.append(cert.name)
+    texts.extend(evidence.text for evidence in profile.all_evidence())
+    for entry in profile.education:
+        texts.extend([entry.degree, entry.institution, entry.year])
+    return [text for text in texts if text]
+
+
+def _experience_sources(entry: object) -> list[str]:
+    from app.models import ExperienceEntry
+
+    if not isinstance(entry, ExperienceEntry):
+        return []
+    texts = [entry.summary, *entry.bullets, " ".join(entry.technologies)]
+    return [text for text in texts if text]
+
+
+def _project_sources(entry: object) -> list[str]:
+    from app.models import ProjectEntry
+
+    if not isinstance(entry, ProjectEntry):
+        return []
+    texts = [entry.summary, *entry.bullets, " ".join(entry.technologies)]
     return [text for text in texts if text]
 
 
@@ -58,16 +64,6 @@ def _skill_supported(name: str, allowed: set[str]) -> bool:
     return lexicon.normalize(canonical) in allowed or lexicon.normalize(name) in allowed
 
 
-def _unsupported_skills(text: str, allowed: set[str]) -> list[str]:
-    found = [canonical for canonical, _ in lexicon.find(text)]
-    return [name for name in found if not _skill_supported(name, allowed)]
-
-
-def _numbers_supported(text: str, source: str, extra: set[str] | None = None) -> set[str]:
-    source_numbers = _numbers(source) | (extra or set())
-    return {number for number in _numbers(text) if number not in source_numbers}
-
-
 def _experience_year_tokens(profile: CandidateProfile) -> set[str]:
     values = {int(profile.experience_years), round(profile.experience_years)}
     return {
@@ -76,35 +72,113 @@ def _experience_year_tokens(profile: CandidateProfile) -> set[str]:
     }
 
 
+def _claim_issues(
+    text: str,
+    sources: list[str],
+    *,
+    location: str,
+    allowed_numbers: set[str] | None = None,
+    include_title: bool = False,
+    require_trace: bool = True,
+) -> tuple[list[ValidationIssue], int, int, list[ReviewItem]]:
+    checks, best, score = check_claims(
+        text,
+        sources,
+        allowed_numbers=allowed_numbers,
+        include_title=include_title,
+    )
+    issues: list[ValidationIssue] = []
+    review: list[ReviewItem] = []
+    supported = 0
+    for check in checks:
+        if check.supported:
+            supported += 1
+            continue
+        issues.append(
+            ValidationIssue(
+                location=location,
+                message=(
+                    f"Unsupported {check.claim.claim_type.replace('_', ' ')} claim: "
+                    f"{check.claim.text}"
+                ),
+                claim_type=check.claim.claim_type,
+                source=best,
+                evidence_text=check.claim.text,
+            )
+        )
+    if require_trace and text.strip() and not issues:
+        if score < 0.35:
+            review.append(
+                ReviewItem(
+                    location=location,
+                    claim=text,
+                    claim_type="traceability",
+                    reason=(
+                        "This generated text cannot be traced closely to a single source "
+                        "bullet. Individual claims are supported, but a human should review it."
+                    ),
+                    source=best,
+                )
+            )
+        elif score < 0.55:
+            review.append(
+                ReviewItem(
+                    location=location,
+                    claim=text,
+                    claim_type="paraphrase",
+                    reason=(
+                        "This is a paraphrase of source evidence. Claims are supported, "
+                        "but the wording should be reviewed."
+                    ),
+                    source=best,
+                )
+            )
+    return issues, len(checks), supported, review
+
+
+def _technologies_issues(
+    values: list[str],
+    sources: list[str],
+    *,
+    location: str,
+) -> list[ValidationIssue]:
+    if not values:
+        return []
+    issues, _, _, _ = _claim_issues(
+        " ".join(values),
+        sources,
+        location=location,
+        require_trace=False,
+    )
+    return issues
+
+
 def validate_resume(
     resume: TailoredResume,
     profile: CandidateProfile,
     job: JobDescription,
 ) -> ValidationReport:
     issues: list[ValidationIssue] = []
+    review_items: list[ReviewItem] = []
+    checked_claims = 0
+    supported_claims = 0
     allowed = _allowed_skills(profile)
-    all_source = " ".join(_source_texts(profile))
     year_tokens = _experience_year_tokens(profile)
 
     if not resume.summary.strip():
         issues.append(ValidationIssue(location="summary", message="Summary is empty."))
-    unsupported_summary = _unsupported_skills(resume.summary, allowed)
-    if unsupported_summary:
-        issues.append(
-            ValidationIssue(
-                location="summary",
-                message="Summary mentions unsupported skills: " + ", ".join(unsupported_summary),
-            )
+    else:
+        summary_issues, checked, supported, review = _claim_issues(
+            resume.summary,
+            _source_texts(profile),
+            location="summary",
+            allowed_numbers=year_tokens,
+            require_trace=False,
         )
-    unsupported_numbers = _numbers_supported(resume.summary, all_source, extra=year_tokens)
-    if unsupported_numbers:
-        issues.append(
-            ValidationIssue(
-                location="summary",
-                message="Summary contains numbers not supported by the profile: "
-                + ", ".join(sorted(unsupported_numbers)),
-            )
-        )
+        issues.extend(summary_issues)
+        review_items.extend(review)
+        checked_claims += checked
+        supported_claims += supported
     if re.search(r"\b(i|me|my|we|our)\b", resume.summary, re.IGNORECASE):
         issues.append(
             ValidationIssue(
@@ -114,6 +188,22 @@ def validate_resume(
             )
         )
 
+    if resume.header.title:
+        title_issues, checked, supported, review = _claim_issues(
+            resume.header.title,
+            [
+                profile.identity.headline,
+                *(entry.role for entry in profile.experience),
+            ],
+            location="header/title",
+            include_title=True,
+            require_trace=False,
+        )
+        issues.extend(title_issues)
+        review_items.extend(review)
+        checked_claims += checked
+        supported_claims += supported
+
     for group in resume.skills:
         for item in group.items:
             if not _skill_supported(item, allowed):
@@ -121,6 +211,7 @@ def validate_resume(
                     ValidationIssue(
                         location=f"skills/{group.category}",
                         message=f"Unsupported skill: {item}",
+                        claim_type="technology",
                     )
                 )
 
@@ -135,6 +226,7 @@ def validate_resume(
                 ValidationIssue(
                     location=f"experience/{entry.company}",
                     message="Company or role does not match the profile.",
+                    claim_type="title",
                 )
             )
             continue
@@ -143,6 +235,8 @@ def validate_resume(
                 ValidationIssue(
                     location=f"experience/{entry.company}",
                     message=f"Start date {entry.start} differs from profile {source.start}.",
+                    claim_type="date",
+                    source=source.company,
                 )
             )
         if entry.end and source.end and entry.end != source.end:
@@ -150,27 +244,28 @@ def validate_resume(
                 ValidationIssue(
                     location=f"experience/{entry.company}",
                     message=f"End date {entry.end} differs from profile {source.end}.",
+                    claim_type="date",
+                    source=source.company,
                 )
             )
-        source_text = " ".join([source.summary, *source.bullets])
+        sources = _experience_sources(source)
+        issues.extend(
+            _technologies_issues(
+                entry.technologies,
+                sources,
+                location=f"experience/{entry.company}/technologies",
+            )
+        )
         for bullet in entry.bullets:
-            unsupported = _unsupported_skills(bullet, allowed)
-            if unsupported:
-                issues.append(
-                    ValidationIssue(
-                        location=f"experience/{entry.company}",
-                        message="Bullet mentions unsupported skills: " + ", ".join(unsupported),
-                    )
-                )
-            numbers = _numbers_supported(bullet, source_text)
-            if numbers:
-                issues.append(
-                    ValidationIssue(
-                        location=f"experience/{entry.company}",
-                        message="Bullet contains unsupported numbers: "
-                        + ", ".join(sorted(numbers)),
-                    )
-                )
+            bullet_issues, checked, supported, review = _claim_issues(
+                bullet,
+                sources,
+                location=f"experience/{entry.company}",
+            )
+            issues.extend(bullet_issues)
+            review_items.extend(review)
+            checked_claims += checked
+            supported_claims += supported
 
     for project in resume.projects:
         project_source = find_project(profile, project.name)
@@ -179,28 +274,28 @@ def validate_resume(
                 ValidationIssue(
                     location=f"project/{project.name}",
                     message="Project does not match the portfolio profile.",
+                    claim_type="title",
                 )
             )
             continue
-        source_text = " ".join([project_source.summary, *project_source.bullets])
+        sources = _project_sources(project_source)
+        issues.extend(
+            _technologies_issues(
+                project.technologies,
+                sources,
+                location=f"project/{project.name}/technologies",
+            )
+        )
         for bullet in project.bullets:
-            unsupported = _unsupported_skills(bullet, allowed)
-            if unsupported:
-                issues.append(
-                    ValidationIssue(
-                        location=f"project/{project.name}",
-                        message="Bullet mentions unsupported skills: " + ", ".join(unsupported),
-                    )
-                )
-            numbers = _numbers_supported(bullet, source_text)
-            if numbers:
-                issues.append(
-                    ValidationIssue(
-                        location=f"project/{project.name}",
-                        message="Bullet contains unsupported numbers: "
-                        + ", ".join(sorted(numbers)),
-                    )
-                )
+            bullet_issues, checked, supported, review = _claim_issues(
+                bullet,
+                sources,
+                location=f"project/{project.name}",
+            )
+            issues.extend(bullet_issues)
+            review_items.extend(review)
+            checked_claims += checked
+            supported_claims += supported
 
     for cert in resume.certifications:
         if find_certification(profile, cert) is None:
@@ -208,6 +303,7 @@ def validate_resume(
                 ValidationIssue(
                     location="certifications",
                     message=f"Certification is not in the profile: {cert}",
+                    claim_type="certification",
                 )
             )
 
@@ -219,12 +315,26 @@ def validate_resume(
                     severity="warning",
                     location="awards",
                     message=f"Award may not match the profile: {award}",
+                    requires_review=True,
+                )
+            )
+            review_items.append(
+                ReviewItem(
+                    location="awards",
+                    claim=award,
+                    claim_type="award",
+                    reason="Award text does not exactly match the profile and needs review.",
+                    source="Awards",
                 )
             )
 
     return ValidationReport(
         valid=not any(issue.severity == "error" for issue in issues),
         issues=issues,
+        review_required=bool(review_items),
+        review_items=review_items,
+        checked_claims=checked_claims,
+        supported_claims=supported_claims,
     )
 
 
@@ -249,11 +359,14 @@ def sanitize_resume(
         skills = deterministic_skills(profile, job)
 
     summary = resume.summary
-    if _unsupported_skills(summary, allowed) or _numbers_supported(
+    summary_issues, _, _, _ = _claim_issues(
         summary,
-        " ".join(_source_texts(profile)),
-        extra=_experience_year_tokens(profile),
-    ):
+        _source_texts(profile),
+        location="summary",
+        allowed_numbers=_experience_year_tokens(profile),
+        require_trace=False,
+    )
+    if summary_issues:
         summary = deterministic_summary(profile, job, analysis)
 
     experience: list[ResumeExperience] = []
@@ -266,13 +379,16 @@ def sanitize_resume(
             ),
             None,
         )
-        source_text = " ".join([source.summary, *source.bullets])
+        sources = _experience_sources(source)
         bullets = []
         if generated_experience:
             for bullet in generated_experience.bullets:
-                if _unsupported_skills(bullet, allowed):
-                    continue
-                if _numbers_supported(bullet, source_text):
+                bullet_issues, _, _, _ = _claim_issues(
+                    bullet,
+                    sources,
+                    location=f"experience/{source.company}",
+                )
+                if bullet_issues:
                     continue
                 bullets.append(bullet)
             bullets = bullets[: experience_bullet_limit(index)]
@@ -297,13 +413,17 @@ def sanitize_resume(
         project_source = find_project(profile, generated_project.name)
         if project_source is None:
             continue
-        source_text = " ".join([project_source.summary, *project_source.bullets])
-        bullets = [
-            bullet
-            for bullet in generated_project.bullets
-            if not _unsupported_skills(bullet, allowed)
-            and not _numbers_supported(bullet, source_text)
-        ]
+        sources = _project_sources(project_source)
+        bullets = []
+        for bullet in generated_project.bullets:
+            bullet_issues, _, _, _ = _claim_issues(
+                bullet,
+                sources,
+                location=f"project/{project_source.name}",
+            )
+            if bullet_issues:
+                continue
+            bullets.append(bullet)
         bullets = bullets[: 3 if project_index == 0 else 2]
         if not bullets:
             bullets = select_bullets(project_source.bullets, job, 2)
