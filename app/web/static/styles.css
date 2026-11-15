@@ -638,6 +638,16 @@ h3 {
   font-size: 17px;
 }
 
+.breakdown-card .breakdown-note {
+  margin-top: 5px;
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-transform: none;
+}
+
 .breakdown-track {
   height: 4px;
   margin-top: 7px;

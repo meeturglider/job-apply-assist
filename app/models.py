@@ -152,6 +152,7 @@ class SkillMatch(BaseModel):
     category: str = ""
     importance: Literal["must_have", "nice_to_have"] = "must_have"
     status: Literal["matched", "partial", "missing"] = "missing"
+    evidence_class: Literal["direct", "adjacent", "unverified", "contradicted"] = "unverified"
     evidence: list[Evidence] = Field(default_factory=list)
     confidence: float = 0.0
     note: str = ""
@@ -169,12 +170,46 @@ class ScoreBreakdown(BaseModel):
     total: float = 0
 
 
+class ScoreComponent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    value: float = 0
+    maximum: float = 0
+    percentage: float = 0
+    explanation: str = ""
+
+
+class EvidenceCoverage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    total: int = 0
+    direct: int = 0
+    adjacent: int = 0
+    unverified: int = 0
+    contradicted: int = 0
+    coverage_pct: float = 0
+    quality_pct: float = 0
+    explanation: str = ""
+
+
+class ScoreReport(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    candidate_suitability: ScoreComponent = Field(default_factory=ScoreComponent)
+    evidence_coverage: ScoreComponent = Field(default_factory=ScoreComponent)
+    keyword_coverage: ScoreComponent = Field(default_factory=ScoreComponent)
+    components: dict[str, ScoreComponent] = Field(default_factory=dict)
+    evidence: EvidenceCoverage = Field(default_factory=EvidenceCoverage)
+    methodology: str = ""
+
+
 class AnalysisResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     job: JobDescription
     matches: list[SkillMatch] = Field(default_factory=list)
     score: ScoreBreakdown = Field(default_factory=ScoreBreakdown)
+    score_report: ScoreReport = Field(default_factory=ScoreReport)
     score_label: str = ""
     matched_skills: list[str] = Field(default_factory=list)
     partial_skills: list[str] = Field(default_factory=list)

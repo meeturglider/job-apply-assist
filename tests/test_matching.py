@@ -129,3 +129,49 @@ async def test_llm_special_requirements_keep_full_text() -> None:
         job.experience_requirements[0].skill
         == "15+ years of technical experience with GCP and Kubernetes"
     )
+
+
+def test_scoring_separates_suitability_evidence_and_keywords(
+    profile: CandidateProfile,
+) -> None:
+    job = JobDescription(
+        title="Platform Engineer",
+        must_have=[
+            Requirement(skill="Kubernetes", importance="must_have"),
+            Requirement(skill="COBOL", importance="must_have"),
+        ],
+        keywords={"Kubernetes": 1.0, "COBOL": 1.0},
+    )
+    result = analyze_match(job, profile)
+    report = result.score_report
+
+    assert report.candidate_suitability.value < 100
+    assert report.evidence_coverage.value == 50.0
+    assert report.keyword_coverage.value == 50.0
+    assert report.evidence.direct == 1
+    assert report.evidence.unverified == 1
+    assert report.evidence.contradicted == 0
+
+    keyword_only_job = job.model_copy(
+        update={"keywords": {"Kubernetes": 5.0, "COBOL": 5.0, "Fortran": 5.0}}
+    )
+    keyword_only = analyze_match(keyword_only_job, profile)
+    assert (
+        keyword_only.score_report.candidate_suitability.value == report.candidate_suitability.value
+    )
+    assert keyword_only.score_report.keyword_coverage.value != report.keyword_coverage.value
+
+
+def test_unverified_is_not_counted_as_contradicted(profile: CandidateProfile) -> None:
+    result = analyze_match(_job("COBOL"), profile)
+    match = result.matches[0]
+    assert match.status == "missing"
+    assert match.evidence_class == "unverified"
+    assert result.score_report.evidence.unverified == 1
+    assert result.score_report.evidence.contradicted == 0
+
+
+def test_legacy_score_remains_populated(profile: CandidateProfile) -> None:
+    result = analyze_match(_job("Kubernetes"), profile)
+    assert result.score.total == result.score_report.candidate_suitability.value
+    assert result.score.must_have > 0

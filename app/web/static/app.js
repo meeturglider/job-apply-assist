@@ -220,7 +220,9 @@ function renderAnalysis(detail) {
   $("result-title").textContent = job.title || "Target role";
   $("result-summary").textContent = job.summary || "";
 
-  const score = Math.round(analysis.score.total);
+  const report = analysis.score_report || {};
+  const suitability = report.candidate_suitability || {};
+  const score = Math.round(suitability.value ?? analysis.score.total);
   const ring = $("score-ring");
   const color = score >= 85 ? "#34d399" : score >= 70 ? "#60a5fa" : score >= 55 ? "#fbbf24" : "#f87171";
   ring.style.background = `conic-gradient(${color} ${score}%, #1e293b ${score}%)`;
@@ -236,7 +238,7 @@ function renderAnalysis(detail) {
   });
   if (!musts.length) chips.appendChild(el("span", "chip", "No must-have skills detected"));
 
-  renderBreakdown(analysis.score);
+  renderBreakdown(analysis);
   renderSkillLists(analysis);
   renderEvidence(analysis);
   renderRecommendations(analysis, job);
@@ -249,28 +251,65 @@ function renderAnalysis(detail) {
     record.status === "generated" ? "Regenerate tailored resume" : "Generate tailored resume";
 }
 
-function renderBreakdown(score) {
+function renderBreakdown(analysis) {
   const container = $("breakdown");
   clear(container);
-  const definitions = [
-    ["Must-have", score.must_have, 55],
-    ["Nice-to-have", score.nice_to_have, 15],
-    ["Role fit", score.responsibilities, 15],
-    ["Certs", score.certifications, 5],
-    ["Seniority", score.seniority, 5],
-    ["Keywords", score.keywords, 5],
-  ];
-  definitions.forEach(([label, value, max]) => {
+  const report = analysis.score_report;
+  let definitions;
+  if (report && report.candidate_suitability) {
+    definitions = [
+      ["Candidate fit", report.candidate_suitability],
+      ["Evidence coverage", report.evidence_coverage],
+      ["Profile keywords", report.keyword_coverage],
+    ];
+  } else {
+    const score = analysis.score;
+    definitions = [
+      ["Must-have", { value: score.must_have, max: 55 }],
+      ["Nice-to-have", { value: score.nice_to_have, max: 15 }],
+      ["Role fit", { value: score.responsibilities, max: 15 }],
+      ["Certs", { value: score.certifications, max: 5 }],
+      ["Seniority", { value: score.seniority, max: 5 }],
+      ["Keywords", { value: score.keywords, max: 5 }],
+    ];
+  }
+  definitions.forEach(([label, metric]) => {
+    const maximum = metric.maximum ?? metric.max ?? 100;
+    const value = metric.value ?? 0;
     const card = el("div", "breakdown-card");
     card.appendChild(el("span", "", label));
-    card.appendChild(el("strong", "", value.toFixed(1)));
+    card.appendChild(el("strong", "", Number(value).toFixed(1)));
     const track = el("div", "breakdown-track");
     const fill = el("div", "breakdown-fill");
-    fill.style.width = `${Math.min(100, (value / max) * 100)}%`;
+    fill.style.width = `${Math.min(100, maximum ? (value / maximum) * 100 : 0)}%`;
     track.appendChild(fill);
     card.appendChild(track);
+    if (metric.explanation) {
+      const note = el("span", "breakdown-note", metric.explanation);
+      note.title = metric.explanation;
+      card.appendChild(note);
+    }
     container.appendChild(card);
   });
+  if (report && report.components) {
+    Object.entries(report.components).forEach(([key, metric]) => {
+      const card = el("div", "breakdown-card component-card");
+      card.appendChild(el("span", "", key.replaceAll("_", " ")));
+      card.appendChild(el("strong", "", Number(metric.value || 0).toFixed(1)));
+      const track = el("div", "breakdown-track");
+      const fill = el("div", "breakdown-fill");
+      const maximum = metric.maximum || 100;
+      fill.style.width = `${Math.min(100, (Number(metric.value || 0) / maximum) * 100)}%`;
+      track.appendChild(fill);
+      card.appendChild(track);
+      if (metric.explanation) {
+        const note = el("span", "breakdown-note", metric.explanation);
+        note.title = metric.explanation;
+        card.appendChild(note);
+      }
+      container.appendChild(card);
+    });
+  }
 }
 
 function skillLine(match) {
