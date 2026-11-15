@@ -147,8 +147,16 @@ def _recommendations(
     total: float,
 ) -> list[str]:
     recommendations: list[str] = []
-    matched = [item.skill for item in matches if item.status == "matched"]
-    partial = [item.skill for item in matches if item.status == "partial"]
+    matched = [
+        item.skill
+        for item in matches
+        if item.status == "matched" and item.category not in {"Education", "Experience"}
+    ]
+    partial = [
+        item.skill
+        for item in matches
+        if item.status == "partial" and item.category not in {"Education", "Experience"}
+    ]
     missing_must = [
         item.skill
         for item in matches
@@ -254,8 +262,16 @@ def analyze_match(job: JobDescription, profile: CandidateProfile) -> AnalysisRes
         1,
     )
 
-    matched = [item.skill for item in matches if item.status == "matched"]
-    partial = [item.skill for item in matches if item.status == "partial"]
+    matched = [
+        item.skill
+        for item in matches
+        if item.status == "matched" and item.category not in {"Education", "Experience"}
+    ]
+    partial = [
+        item.skill
+        for item in matches
+        if item.status == "partial" and item.category not in {"Education", "Experience"}
+    ]
     missing_must = [
         item.skill
         for item in matches

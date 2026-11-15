@@ -68,6 +68,14 @@ def _numbers_supported(text: str, source: str, extra: set[str] | None = None) ->
     return {number for number in _numbers(text) if number not in source_numbers}
 
 
+def _experience_year_tokens(profile: CandidateProfile) -> set[str]:
+    values = {int(profile.experience_years), round(profile.experience_years)}
+    return {
+        *(f"{value}{suffix}" for value in values for suffix in ("", "+")),
+        f"{profile.experience_years:g}",
+    }
+
+
 def validate_resume(
     resume: TailoredResume,
     profile: CandidateProfile,
@@ -76,11 +84,7 @@ def validate_resume(
     issues: list[ValidationIssue] = []
     allowed = _allowed_skills(profile)
     all_source = " ".join(_source_texts(profile))
-    year_tokens = {
-        str(int(profile.experience_years)),
-        f"{int(profile.experience_years)}+",
-        f"{profile.experience_years:g}",
-    }
+    year_tokens = _experience_year_tokens(profile)
 
     if not resume.summary.strip():
         issues.append(ValidationIssue(location="summary", message="Summary is empty."))
@@ -248,7 +252,7 @@ def sanitize_resume(
     if _unsupported_skills(summary, allowed) or _numbers_supported(
         summary,
         " ".join(_source_texts(profile)),
-        extra={str(int(profile.experience_years)), f"{int(profile.experience_years)}+"},
+        extra=_experience_year_tokens(profile),
     ):
         summary = deterministic_summary(profile, job, analysis)
 

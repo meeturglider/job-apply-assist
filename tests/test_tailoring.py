@@ -14,7 +14,12 @@ from app.models import (
     TailoredResume,
 )
 from app.tailoring.builder import build_resume
-from app.tailoring.selection import deterministic_projects, deterministic_skills
+from app.tailoring.selection import (
+    deterministic_projects,
+    deterministic_skills,
+    deterministic_summary,
+    header_for,
+)
 from app.tailoring.validator import sanitize_resume, validate_resume
 
 
@@ -102,3 +107,23 @@ def test_deterministic_selection_stays_grounded(profile: CandidateProfile) -> No
     assert "Kubernetes" in items
     assert "Terraform" in items
     assert all(project.name for project in projects)
+
+
+def test_deterministic_summary_uses_rounded_experience(profile: CandidateProfile) -> None:
+    candidate = profile.model_copy(update={"experience_years": 15.8})
+    job = _job()
+    summary = deterministic_summary(candidate, job, analyze_match(job, candidate))
+    assert "16+ years" in summary
+
+
+def test_title_and_summary_do_not_add_unsupported_jd_data(profile: CandidateProfile) -> None:
+    job = JobDescription(
+        title="Director of Sales",
+        must_have=[Requirement(skill="COBOL"), Requirement(skill="Fortran")],
+    )
+    analysis = analyze_match(job, profile)
+    summary = deterministic_summary(profile, job, analysis)
+    assert header_for(profile, job).title == "Senior Platform Engineer"
+    assert "Director of Sales" not in summary
+    assert "COBOL" not in summary
+    assert "Fortran" not in summary

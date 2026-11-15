@@ -46,4 +46,7 @@ def test_renders_markdown_html_and_docx(profile: CandidateProfile, tmp_path: Pat
     assert "Kubernetes" in markdown
     assert "<html" in html.casefold()
     assert "single" not in html.casefold() or "table" not in html.casefold()
+    assert '<a href="mailto:test@example.com">test@example.com</a>' in html
+    assert "&lt;span" not in html
+    assert 'class="contact"' in html
     assert target.exists() and target.stat().st_size > 1000

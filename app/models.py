@@ -133,6 +133,8 @@ class JobDescription(BaseModel):
     summary: str = ""
     must_have: list[Requirement] = Field(default_factory=list)
     nice_to_have: list[Requirement] = Field(default_factory=list)
+    education_requirements: list[Requirement] = Field(default_factory=list)
+    experience_requirements: list[Requirement] = Field(default_factory=list)
     responsibilities: list[str] = Field(default_factory=list)
     certifications: list[Requirement] = Field(default_factory=list)
     keywords: dict[str, float] = Field(default_factory=dict)

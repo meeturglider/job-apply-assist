@@ -121,9 +121,211 @@ def _related_candidates(
     return results
 
 
+def _education_evidence(profile: CandidateProfile) -> list[Evidence]:
+    return [
+        Evidence(
+            source="Education",
+            text=", ".join(part for part in (entry.degree, entry.institution) if part),
+        )
+        for entry in profile.education
+        if entry.degree
+    ]
+
+
+def _has_master_degree(profile: CandidateProfile) -> bool:
+    return any(
+        re.search(r"\b(master|mba|ph\.?d|doctorate)\b", entry.degree, re.IGNORECASE)
+        for entry in profile.education
+    )
+
+
+def _has_bachelor_degree(profile: CandidateProfile) -> bool:
+    return any(
+        re.search(
+            r"\b(bachelor|b\.?\s?tech|b\.?\s?e\.?|undergraduate|degree)\b",
+            entry.degree,
+            re.IGNORECASE,
+        )
+        for entry in profile.education
+    )
+
+
+def _education_match(requirement: Requirement, profile: CandidateProfile) -> SkillMatch:
+    text = requirement.skill
+    lowered = text.casefold()
+    evidence = _education_evidence(profile)
+    if not evidence:
+        return SkillMatch(
+            skill=text,
+            category="Education",
+            importance=requirement.importance,
+            status="missing",
+            confidence=0.0,
+            note="No education evidence found in the master resume.",
+        )
+
+    wants_advanced = bool(re.search(r"\b(master|mba|ph\.?d|doctorate)\b", lowered))
+    wants_bachelor = bool(
+        re.search(r"\b(bachelor|b\.?\s?tech|b\.?\s?e\.?|undergraduate|degree)\b", lowered)
+    )
+    related = bool(re.search(r"\b(related|equivalent|adjacent)\b", lowered))
+
+    if wants_advanced and not _has_master_degree(profile):
+        return SkillMatch(
+            skill=text,
+            category="Education",
+            importance=requirement.importance,
+            status="partial",
+            evidence=evidence[:2],
+            confidence=0.5,
+            note="Bachelor's degree found; the role asks for a more advanced degree.",
+        )
+
+    if (wants_bachelor or wants_advanced) and not _has_bachelor_degree(profile):
+        return SkillMatch(
+            skill=text,
+            category="Education",
+            importance=requirement.importance,
+            status="partial",
+            evidence=evidence[:2],
+            confidence=0.5,
+            note="Education is present, but the degree level could not be confirmed.",
+        )
+
+    field_is_cs = bool(re.search(r"computer science|\bcs\b|software engineering", lowered))
+    degree_text = " ".join(entry.degree for entry in profile.education).casefold()
+    has_cs_field = any(
+        term in degree_text
+        for term in ("computer science", "software engineering", "information technology", " cs ")
+    )
+    if field_is_cs and has_cs_field:
+        return SkillMatch(
+            skill=text,
+            category="Education",
+            importance=requirement.importance,
+            status="matched",
+            evidence=evidence[:2],
+            confidence=0.95,
+            note="Degree field directly matches the requirement.",
+        )
+    if field_is_cs and not related:
+        return SkillMatch(
+            skill=text,
+            category="Education",
+            importance=requirement.importance,
+            status="partial",
+            evidence=evidence[:2],
+            confidence=0.6,
+            note="Engineering degree is adjacent, but the JD asks for an exact CS field.",
+        )
+
+    note = "Degree requirement satisfied."
+    if field_is_cs and related:
+        note = "Engineering degree satisfies the related-field degree requirement."
+    return SkillMatch(
+        skill=text,
+        category="Education",
+        importance=requirement.importance,
+        status="matched",
+        evidence=evidence[:2],
+        confidence=0.9,
+        note=note,
+    )
+
+
+def _is_education_text(value: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(bachelor|master|mba|ph\.?d|doctorate|degree|b\.?\s?tech|m\.?\s?tech)\b",
+            value,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _required_years(text: str) -> int | None:
+    matches = re.findall(r"\b(\d{1,2})\s*\+?\s*(?:years?|yrs?)\b", text, re.IGNORECASE)
+    return min(int(value) for value in matches) if matches else None
+
+
+def _experience_match(requirement: Requirement, profile: CandidateProfile) -> SkillMatch:
+    text = requirement.skill
+    if not profile.experience:
+        return SkillMatch(
+            skill=text,
+            category="Experience",
+            importance=requirement.importance,
+            status="missing",
+            confidence=0.0,
+            note="No professional experience found in the master resume.",
+        )
+
+    years = round(profile.experience_years)
+    earliest = profile.experience[-1]
+    evidence = Evidence(
+        source="Experience",
+        text=(
+            f"{profile.experience_years:.1f} years across {len(profile.experience)} roles"
+            + (f" since {earliest.start}." if earliest.start else ".")
+        ),
+    )
+    required = _required_years(text)
+    if required is None:
+        return SkillMatch(
+            skill=text,
+            category="Experience",
+            importance=requirement.importance,
+            status="matched",
+            evidence=[evidence],
+            confidence=0.8,
+            note="Professional experience is present.",
+        )
+    if years >= required:
+        return SkillMatch(
+            skill=text,
+            category="Experience",
+            importance=requirement.importance,
+            status="matched",
+            evidence=[evidence],
+            confidence=0.9,
+            note=f"Computed experience rounds to {years} years.",
+        )
+    if years + 1 >= required:
+        return SkillMatch(
+            skill=text,
+            category="Experience",
+            importance=requirement.importance,
+            status="partial",
+            evidence=[evidence],
+            confidence=0.5,
+            note=f"Computed experience is {profile.experience_years:.1f} years.",
+        )
+    return SkillMatch(
+        skill=text,
+        category="Experience",
+        importance=requirement.importance,
+        status="missing",
+        evidence=[evidence],
+        confidence=0.0,
+        note=f"Computed experience is {profile.experience_years:.1f} years.",
+    )
+
+
 def match_requirements(job: JobDescription, profile: CandidateProfile) -> list[SkillMatch]:
     matches: list[SkillMatch] = []
     seen: set[str] = set()
+    for requirement in [*job.education_requirements, *job.experience_requirements]:
+        key = lexicon.normalize(requirement.skill)
+        if key in seen:
+            continue
+        seen.add(key)
+        if requirement.category == "Education" or (
+            requirement.category != "Experience" and _is_education_text(requirement.skill)
+        ):
+            matches.append(_education_match(requirement, profile))
+        else:
+            matches.append(_experience_match(requirement, profile))
+
     for requirement in [*job.must_have, *job.nice_to_have]:
         key = lexicon.normalize(requirement.skill)
         if key in seen:

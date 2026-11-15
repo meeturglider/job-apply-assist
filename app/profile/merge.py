@@ -213,7 +213,7 @@ def build_profile(master_path: Path, portfolio: PortfolioSnapshot | None) -> Can
         projects=projects,
         certifications=certifications,
         education=master.education,
-        awards=_merge_list([], portfolio_profile.awards),
+        awards=_merge_list(master.awards, portfolio_profile.awards),
         skills=skills,
         skill_categories={key: value for key, value in lexicon.categories.items()},
         sources={**master.sources, **portfolio_profile.sources},
@@ -230,7 +230,7 @@ def _add_duration_warnings(
     matches = set(re.findall(r"\b1[4-9]\+?\s*years\b", raw, re.IGNORECASE))
     for value in matches:
         number = int(re.search(r"\d+", value).group(0))  # type: ignore[union-attr]
-        if number > int(master.experience_years):
+        if number > round(master.experience_years):
             warnings.append(
                 f"Portfolio contains a hardcoded duration ({value}) above the computed "
                 f"{master.experience_years:g} years. The computed value will be used."

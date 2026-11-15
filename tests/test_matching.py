@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.config import Settings
+from app.jd.analyze import analyze_job
+from app.llm import OllamaClient
 from app.matching.matcher import keyword_presence, match_requirements
 from app.matching.scorer import analyze_match
 from app.models import CandidateProfile, JobDescription, Requirement
@@ -39,3 +42,90 @@ def test_scoring_rewards_matches_and_penalizes_gaps(profile: CandidateProfile) -
 def test_keyword_presence_uses_alias_evidence(profile: CandidateProfile) -> None:
     assert keyword_presence("GCP", profile) is True
     assert keyword_presence("COBOL", profile) is False
+
+
+def test_related_engineering_degree_satisfies_cs_requirement(profile: CandidateProfile) -> None:
+    candidate = profile.model_copy(
+        update={
+            "education": profile.education
+            and [
+                profile.education[0].model_copy(
+                    update={"degree": "B.E. in Electronics & Communication"}
+                )
+            ]
+        }
+    )
+    job = JobDescription(
+        title="Cloud Architect",
+        education_requirements=[
+            Requirement(
+                skill="Bachelor's degree in Computer Science or related field",
+                category="Education",
+            )
+        ],
+    )
+    result = analyze_match(job, candidate)
+    match = result.matches[0]
+    assert match.status == "matched"
+    assert "related-field" in match.note
+    assert "Electronics & Communication" in match.evidence[0].text
+
+
+def test_experience_years_are_matched_from_computed_duration(profile: CandidateProfile) -> None:
+    candidate = profile.model_copy(update={"experience_years": 15.8})
+    job = JobDescription(
+        title="Cloud Architect",
+        experience_requirements=[
+            Requirement(skill="15+ years of technical experience", category="Experience"),
+            Requirement(skill="16+ years of technical experience", category="Experience"),
+        ],
+    )
+    result = analyze_match(job, candidate)
+    assert [match.status for match in result.matches] == ["matched", "matched"]
+    assert not result.missing_must_have
+
+
+async def test_jd_extraction_separates_education_and_experience() -> None:
+    client = OllamaClient(Settings(llm_provider="none"))
+    job = await analyze_job(
+        "Bachelor's degree in Computer Science or related field. "
+        "15+ years of technical experience. Kubernetes and Terraform required.",
+        client,
+    )
+    assert job.education_requirements
+    assert job.experience_requirements
+    assert all("Bachelor" not in item.skill for item in job.must_have)
+    assert all("15+ years" not in item.skill for item in job.must_have)
+
+
+async def test_llm_special_requirements_keep_full_text() -> None:
+    class FakeLLM:
+        enabled = True
+
+        async def json(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {
+                "education_requirements": [
+                    {
+                        "skill": "Bachelor's degree in Computer Science or related field",
+                        "category": "Education",
+                    }
+                ],
+                "experience_requirements": [
+                    {
+                        "skill": "15+ years of technical experience with GCP and Kubernetes",
+                        "category": "Experience",
+                    }
+                ],
+                "must_have": [],
+                "nice_to_have": [],
+            }
+
+    job = await analyze_job("Senior Cloud Architect", FakeLLM())  # type: ignore[arg-type]
+    assert (
+        job.education_requirements[0].skill
+        == "Bachelor's degree in Computer Science or related field"
+    )
+    assert (
+        job.experience_requirements[0].skill
+        == "15+ years of technical experience with GCP and Kubernetes"
+    )

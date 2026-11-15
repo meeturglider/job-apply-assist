@@ -43,6 +43,14 @@ CERT_PATTERNS = [
     r"Security\+",
 ]
 
+EDUCATION_RE = re.compile(
+    r"\b(bachelor(?:'s)?|master(?:'s)?|master of|mba|ph\.?d|doctorate|"
+    r"associate(?:'s)?|degree|b\.?\s?tech|m\.?\s?tech|b\.?\s?e\.?)\b",
+    re.IGNORECASE,
+)
+EXPERIENCE_YEARS_RE = re.compile(r"\b(?P<years>\d{1,2})\s*\+?\s*(?:years?|yrs?)\b", re.IGNORECASE)
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
 STOPWORDS = {
     "the",
     "and",
@@ -221,7 +229,102 @@ def _detect_certifications(text: str) -> list[Requirement]:
     return found
 
 
-def _normalize_requirements(values: Any, importance: str) -> list[Requirement]:
+def _is_education_requirement(value: str) -> bool:
+    lowered = value.casefold()
+    if not EDUCATION_RE.search(lowered):
+        return False
+    return any(
+        term in lowered
+        for term in (
+            "degree",
+            "bachelor",
+            "master's",
+            "master of",
+            "mba",
+            "ph.d",
+            "phd",
+            "doctorate",
+            "associate's",
+            "b.tech",
+            "m.tech",
+        )
+    )
+
+
+def _is_experience_requirement(value: str) -> bool:
+    lowered = value.casefold()
+    if not EXPERIENCE_YEARS_RE.search(lowered):
+        return False
+    return any(
+        term in lowered
+        for term in (
+            "experience",
+            "technical",
+            "industry",
+            "relevant",
+            "track record",
+            "background",
+        )
+    )
+
+
+def _requirement_sentences(text: str) -> list[str]:
+    sentences: list[str] = []
+    for value in SENTENCE_SPLIT_RE.split(text):
+        cleaned = re.sub(r"^[\s•*\-–]+", "", value)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,;:-")
+        if 8 <= len(cleaned) <= 300:
+            sentences.append(cleaned)
+    return sentences
+
+
+def _detect_education_requirements(text: str) -> list[Requirement]:
+    found: list[Requirement] = []
+    seen: set[str] = set()
+    for sentence in _requirement_sentences(text):
+        if not _is_education_requirement(sentence):
+            continue
+        key = sentence.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(
+            Requirement(
+                skill=sentence,
+                category="Education",
+                importance="must_have",
+                weight=1.5,
+                context="Mentioned in the job description.",
+            )
+        )
+    return found
+
+
+def _detect_experience_requirements(text: str) -> list[Requirement]:
+    found: list[Requirement] = []
+    seen: set[str] = set()
+    for sentence in _requirement_sentences(text):
+        if not _is_experience_requirement(sentence):
+            continue
+        key = sentence.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(
+            Requirement(
+                skill=sentence,
+                category="Experience",
+                importance="must_have",
+                weight=1.5,
+                context="Mentioned in the job description.",
+            )
+        )
+    return found
+
+
+def _normalize_requirements(
+    values: Any, importance: str, *, canonicalize: bool = True
+) -> list[Requirement]:
     result: list[Requirement] = []
     seen: set[str] = set()
     if not isinstance(values, list):
@@ -244,7 +347,7 @@ def _normalize_requirements(values: Any, importance: str) -> list[Requirement]:
             continue
         if not skill or len(skill) > 120:
             continue
-        canonical = lexicon.canonicalize(skill)
+        canonical = lexicon.canonicalize(skill) if canonicalize else skill
         key = canonical.casefold()
         if key in seen:
             continue
@@ -332,6 +435,34 @@ async def analyze_job(
     nice = _merge_requirements(nice, heuristic_nice)
     certifications = _merge_requirements(certifications, heuristic_certs)
 
+    education_requirements = _merge_requirements(
+        _normalize_requirements(
+            llm_data.get("education_requirements"), "must_have", canonicalize=False
+        ),
+        _detect_education_requirements(text),
+    )
+    experience_requirements = _merge_requirements(
+        _normalize_requirements(
+            llm_data.get("experience_requirements"), "must_have", canonicalize=False
+        ),
+        _detect_experience_requirements(text),
+    )
+    for requirement in education_requirements:
+        requirement.category = "Education"
+    for requirement in experience_requirements:
+        requirement.category = "Experience"
+
+    must = [
+        item
+        for item in must
+        if not _is_education_requirement(item.skill) and not _is_experience_requirement(item.skill)
+    ]
+    nice = [
+        item
+        for item in nice
+        if not _is_education_requirement(item.skill) and not _is_experience_requirement(item.skill)
+    ]
+
     if not must:
         must = heuristic_must
         warnings.append("No must-have requirements were detected; review the JD manually.")
@@ -393,6 +524,8 @@ async def analyze_job(
         summary=summary,
         must_have=must,
         nice_to_have=nice,
+        education_requirements=education_requirements,
+        experience_requirements=experience_requirements,
         responsibilities=responsibilities[:12],
         certifications=certifications,
         keywords=dict(sorted(keywords.items(), key=lambda item: -item[1])[:40]),
@@ -430,6 +563,8 @@ def job_prompt_payload(job: JobDescription) -> str:
             "summary": job.summary,
             "must_have": [item.model_dump() for item in job.must_have],
             "nice_to_have": [item.model_dump() for item in job.nice_to_have],
+            "education_requirements": [item.model_dump() for item in job.education_requirements],
+            "experience_requirements": [item.model_dump() for item in job.experience_requirements],
             "responsibilities": job.responsibilities,
             "certifications": [item.model_dump() for item in job.certifications],
             "keywords": job.keywords,

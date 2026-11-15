@@ -8,6 +8,9 @@ The app never invents experience, skills, metrics, or certifications. Every gene
 claim is checked against your source resume and portfolio. When the local LLM produces
 an unsupported claim, the sanitizer removes it or falls back to deterministic selection.
 
+Degree requirements and minimum-years requirements are evaluated against the education
+section and computed professional experience instead of being treated as missing skills.
+
 ## Quick Start
 
 Requirements:

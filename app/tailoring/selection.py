@@ -116,11 +116,60 @@ def deterministic_skills(
     ]
 
 
+TITLE_LEVEL_WORDS = {
+    "senior",
+    "junior",
+    "lead",
+    "staff",
+    "principal",
+    "director",
+    "vp",
+    "head",
+    "chief",
+    "engineer",
+    "engineering",
+    "architect",
+    "manager",
+    "developer",
+}
+
+
+def _profile_title(profile: CandidateProfile) -> str:
+    headline = re.split(r"\s*[|•·]\s*", profile.identity.headline.strip())[0].strip()
+    if headline:
+        return headline
+    if profile.experience:
+        return profile.experience[0].role
+    return "Technology professional"
+
+
+def _supported_title(profile: CandidateProfile, value: str) -> str:
+    title = value.strip()
+    if not title:
+        return ""
+    haystack = " ".join(
+        [profile.identity.headline, *(entry.role for entry in profile.experience)]
+    ).casefold()
+    if title.casefold() in haystack:
+        return title
+    wanted = {
+        token
+        for token in re.findall(r"[a-z0-9+#.]+", title.casefold())
+        if len(token) > 2 and token not in TITLE_LEVEL_WORDS
+    }
+    available = set(re.findall(r"[a-z0-9+#.]+", haystack))
+    return title if wanted and wanted <= available else ""
+
+
+def _resume_title(profile: CandidateProfile, job: JobDescription) -> str:
+    return _supported_title(profile, job.title) or _profile_title(profile)
+
+
 def header_for(profile: CandidateProfile, job: JobDescription) -> ResumeHeader:
     identity = profile.identity
     return ResumeHeader(
         name=identity.name,
-        title=job.title or identity.headline,
+        title=_resume_title(profile, job),
         location=identity.location,
         email=identity.email,
         phone=identity.phone,
@@ -131,7 +180,7 @@ def header_for(profile: CandidateProfile, job: JobDescription) -> ResumeHeader:
 
 
 def _summary_title(profile: CandidateProfile, job: JobDescription) -> str:
-    title = job.title or profile.identity.headline or "Technology professional"
+    title = _resume_title(profile, job)
     unsupported = [
         canonical
         for canonical, _ in lexicon.find(title)
@@ -144,7 +193,7 @@ def deterministic_summary(
     profile: CandidateProfile, job: JobDescription, analysis: AnalysisResult
 ) -> str:
     years = profile.experience_years
-    years_text = f"{int(years)}+" if years >= 1 else ""
+    years_text = f"{round(years)}+" if years >= 1 else ""
     title = _summary_title(profile, job)
     companies: list[str] = []
     for entry in profile.experience[:3]:
@@ -152,7 +201,9 @@ def deterministic_summary(
             companies.append(entry.company)
     top_skills = analysis.matched_skills[:6]
     if not top_skills:
-        top_skills = [requirement.skill for requirement in job.must_have[:5]]
+        top_skills = [item for group in deterministic_skills(profile, job) for item in group.items][
+            :6
+        ]
     parts = [
         title
         + (f" with {years_text} years of experience" if years_text else "")

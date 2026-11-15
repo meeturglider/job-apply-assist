@@ -58,10 +58,33 @@ Strong engineering leader with expertise in infrastructure automation, operation
 * Gemini
 * Agent Harness
 * ADK
+* Agent Builder
+* Agent2Agent (A2A)
+* Model Armor
+* OPA/Rego
+* RAG
+* Vector Search
 * LLM Workflow Automation
 * AI Infrastructure
 * AI Operational Tooling
 * Platform Engineering
+
+## Data & Application Engineering
+
+* BigQuery
+* Spanner
+* Spanner Graph
+* Cloud SQL
+* PostgreSQL
+* Redis
+* Pub/Sub
+* FastAPI
+* Angular
+* Next.js
+* WebSocket
+* WebRTC
+* MediaPipe
+* Pydantic
 
 ## Security & Networking
 
@@ -120,6 +143,42 @@ Architected a full-stack AI-powered assessment platform using Angular and Postgr
 
   * 60% improvement in quality hiring
   * 35% improvement in cloud support operational metrics
+
+### Cloud Assist as a Service (CaaS) – Agentic GCP Operations Platform
+
+Designed a portfolio of specialized Google Cloud support agents that collaborate through Agent2Agent (A2A) orchestration to handle research, diagnostics, and remediation workflows.
+
+### Key Contributions
+
+* Architected agentic workflows using Vertex AI, Gemini, Google ADK, Agent Builder, and Agent Harness.
+* Implemented safe execution patterns with human-in-the-loop approvals, OPA/Rego policy controls, Model Armor, and Workload Identity Federation.
+* Built retrieval and grounding pipelines using Cloud Storage, BigQuery, Spanner Graph, Vertex AI Search, and RAG.
+* Developed agent services and operational dashboards using Python, FastAPI, Angular, PostgreSQL, and Pub/Sub.
+* Designed zero-trust execution boundaries for privileged support actions across GCP environments.
+* Automated infrastructure provisioning and agent deployment using Terraform and CI/CD pipelines.
+
+### Elevate 360 – LLM Performance Intelligence Platform
+
+Designed and built an LLM evaluation and performance intelligence platform for comparing models, prompts, and retrieval strategies across quality, latency, and cost.
+
+### Key Contributions
+
+* Built evaluation pipelines covering prompt quality, LLM-as-judge scoring, regression testing, bias checks, and safety evaluation.
+* Implemented model comparison across Vertex AI, Gemini, Ollama, vLLM, Hugging Face, and hosted providers.
+* Developed RAG evaluation workflows covering retrieval quality, groundedness, and context relevance.
+* Created prompt optimization and fine-tuning workflows with performance gating before production rollout.
+* Built the platform using Next.js, FastAPI, PostgreSQL, Redis, and containerized model runtimes.
+
+### AI Technical Interviewer
+
+Designed a real-time AI technical interviewing platform combining conversational AI, speech processing, and structured candidate evaluation.
+
+### Key Contributions
+
+* Built low-latency audio interview workflows using WebSocket streaming, WebRTC, and MediaPipe.
+* Implemented RAG-based question generation and rubric-driven technical evaluation.
+* Designed candidate analytics covering communication, problem-solving, and technical depth.
+* Developed the application using Next.js, FastAPI, PostgreSQL, and containerized AI services.
 
 ---
 
@@ -233,6 +292,18 @@ Architected a full-stack AI-powered assessment platform using Angular and Postgr
 
 Francis Xavier Engineering College
 
+Engineering degree in a related technical field for Computer Science, platform, and cloud roles.
+
+---
+
+# AWARDS
+
+* Transformation Spot Achiever – Cognizant
+* Raising the Bar – Above and Beyond – Cognizant
+* Best Performer – Bi-Annual Award – Google Operations Center
+* Jump Starter TL – Google Operations Center
+* Best Performer – Quarterly Award – Cisco Systems
+
 ---
 
 # ADDITIONAL AI INFRASTRUCTURE EXPERIENCE
@@ -273,4 +344,4 @@ Built a personal AI engineering environment integrating:
 
 # ATS KEYWORDS
 
-Cloud Architecture, Kubernetes, Docker, Terraform, DevOps, CI/CD, Jenkins, Infrastructure as Code, Platform Engineering, GCP, AWS, Cloud Run, Linux, Python, Automation, SRE, Cloud Security, IAM, Networking, AI Infrastructure, Vertex AI, Gemini Enterprise, Generative AI, LLM, Cloud Operations, Engineering Leadership
+Cloud Architecture, Kubernetes, Docker, Terraform, DevOps, CI/CD, Jenkins, Infrastructure as Code, Platform Engineering, GCP, AWS, Cloud Run, Linux, Python, Automation, SRE, Cloud Security, IAM, Networking, AI Infrastructure, Vertex AI, Gemini Enterprise, Generative AI, LLM, Agentic AI, Agent2Agent, A2A, RAG, Model Armor, OPA, FastAPI, PostgreSQL, BigQuery, Pub/Sub, Cloud Operations, Engineering Leadership

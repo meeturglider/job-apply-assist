@@ -241,6 +241,17 @@ def _parse_certifications(lines: list[str]) -> list[Certification]:
     return result
 
 
+def _parse_awards(lines: list[str]) -> list[str]:
+    result: list[str] = []
+    for line in lines:
+        match = BULLET_RE.match(line)
+        if match:
+            value = _clean_bullet(match.group("text"))
+            if value:
+                result.append(value)
+    return _dedupe(result)
+
+
 def _parse_education(lines: list[str]) -> list[EducationEntry]:
     degree = ""
     institution = ""
@@ -299,6 +310,7 @@ def parse_master_resume(path: Path) -> CandidateProfile:
     skill_groups = _parse_skills(sections.get("core skills", []))
     certifications = _parse_certifications(sections.get("certifications", []))
     education = _parse_education(sections.get("education", []))
+    awards = _parse_awards(sections.get("awards", []))
 
     projects: list[ProjectEntry] = []
     ai_lab = _parse_ai_lab(sections.get("additional ai infrastructure experience", []))
@@ -350,6 +362,7 @@ def parse_master_resume(path: Path) -> CandidateProfile:
         projects=projects,
         certifications=certifications,
         education=education,
+        awards=awards,
         skills=skills,
         skill_categories={key: value for key, value in lexicon.categories.items()},
         sources={"master_resume": str(path)},
@@ -361,7 +374,7 @@ def _close_years(value: str, computed: float) -> bool:
     match = re.search(r"\d+", value)
     if not match:
         return False
-    return int(match.group(0)) == int(computed)
+    return abs(int(match.group(0)) - round(computed)) <= 1
 
 
 def _years_of_experience(experience: list[ExperienceEntry]) -> float:

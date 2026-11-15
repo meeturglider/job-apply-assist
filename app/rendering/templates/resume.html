@@ -44,20 +44,32 @@
     }
 
     .contact {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0;
       margin: 5px 0 0;
+      padding: 0;
+      list-style: none;
       font-size: 8.7pt;
       color: #374151;
       line-height: 1.45;
     }
 
+    .contact li {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .contact li + li::before {
+      content: "|";
+      margin: 0 6px;
+      color: #9ca3af;
+    }
+
     .contact a {
       color: #111827;
       text-decoration: none;
-    }
-
-    .sep {
-      color: #6b7280;
-      padding: 0 3px;
     }
 
     section {
@@ -174,16 +186,16 @@
   <header class="header">
     <h1 class="name">{{ resume.header.name }}</h1>
     {% if resume.header.title %}<p class="headline">{{ resume.header.title }}</p>{% endif %}
-    <p class="contact">
-      {% set contact_parts = [] %}
-      {% if resume.header.location %}{% set _ = contact_parts.append(resume.header.location) %}{% endif %}
-      {% if resume.header.email %}{% set _ = contact_parts.append('<a href="mailto:' ~ resume.header.email ~ '">' ~ resume.header.email ~ '</a>') %}{% endif %}
-      {% if resume.header.phone %}{% set _ = contact_parts.append(resume.header.phone) %}{% endif %}
-      {% if resume.header.linkedin %}{% set _ = contact_parts.append('<a href="' ~ resume.header.linkedin ~ '">' ~ display_url(resume.header.linkedin) ~ '</a>') %}{% endif %}
-      {% if resume.header.github %}{% set _ = contact_parts.append('<a href="' ~ resume.header.github ~ '">' ~ display_url(resume.header.github) ~ '</a>') %}{% endif %}
-      {% if resume.header.portfolio %}{% set _ = contact_parts.append('<a href="' ~ resume.header.portfolio ~ '">' ~ display_url(resume.header.portfolio) ~ '</a>') %}{% endif %}
-      {{ contact_parts|join(' <span class="sep">|</span> ')|safe }}
-    </p>
+    {% if resume.header.location or resume.header.email or resume.header.phone or resume.header.linkedin or resume.header.github or resume.header.portfolio %}
+    <ul class="contact">
+      {% if resume.header.location %}<li>{{ resume.header.location }}</li>{% endif %}
+      {% if resume.header.email %}<li><a href="mailto:{{ resume.header.email }}">{{ resume.header.email }}</a></li>{% endif %}
+      {% if resume.header.phone %}<li>{{ resume.header.phone }}</li>{% endif %}
+      {% if resume.header.linkedin %}<li><a href="{{ resume.header.linkedin }}">{{ display_url(resume.header.linkedin) }}</a></li>{% endif %}
+      {% if resume.header.github %}<li><a href="{{ resume.header.github }}">{{ display_url(resume.header.github) }}</a></li>{% endif %}
+      {% if resume.header.portfolio %}<li><a href="{{ resume.header.portfolio }}">{{ display_url(resume.header.portfolio) }}</a></li>{% endif %}
+    </ul>
+    {% endif %}
   </header>
 
   {% if resume.summary %}
