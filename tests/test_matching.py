@@ -3,9 +3,10 @@ from __future__ import annotations
 from app.config import Settings
 from app.jd.analyze import analyze_job
 from app.llm import OllamaClient
+from app.matching.dimensions import classify_dimension
 from app.matching.matcher import keyword_presence, match_requirements
 from app.matching.scorer import analyze_match
-from app.models import CandidateProfile, JobDescription, Requirement
+from app.models import CandidateProfile, Evidence, JobDescription, Requirement
 
 
 def _job(*skills: str) -> JobDescription:
@@ -175,3 +176,87 @@ def test_legacy_score_remains_populated(profile: CandidateProfile) -> None:
     result = analyze_match(_job("Kubernetes"), profile)
     assert result.score.total == result.score_report.candidate_suitability.value
     assert result.score.must_have > 0
+
+
+def test_contradicting_evidence_is_distinguished_from_missing(
+    profile: CandidateProfile,
+) -> None:
+    candidate = profile.model_copy(
+        update={
+            "skills": {
+                **profile.skills,
+                "COBOL": [
+                    Evidence(
+                        source="Resume",
+                        text="No COBOL experience; this profile never used COBOL.",
+                    )
+                ],
+            }
+        }
+    )
+    result = analyze_match(_job("COBOL"), candidate)
+    match = result.matches[0]
+    assert match.status == "missing"
+    assert match.evidence_class == "contradicted"
+    assert match.evidence
+    assert result.score_report.evidence.contradicted == 1
+
+
+def test_experience_shortfall_is_contradicted(profile: CandidateProfile) -> None:
+    candidate = profile.model_copy(update={"experience_years": 3.0})
+    job = JobDescription(
+        experience_requirements=[
+            Requirement(skill="10+ years of technical experience", category="Experience")
+        ]
+    )
+    match = analyze_match(job, candidate).matches[0]
+    assert match.status == "missing"
+    assert match.evidence_class == "contradicted"
+
+
+def test_responsibility_matching_retains_source_and_explanation(
+    profile: CandidateProfile,
+) -> None:
+    lead_bullet = "Led and mentored a team of 6 platform engineers."
+    candidate = profile.model_copy(
+        update={
+            "experience": [
+                profile.experience[0].model_copy(
+                    update={"bullets": [lead_bullet, *profile.experience[0].bullets]}
+                ),
+                *profile.experience[1:],
+            ]
+        }
+    )
+    job = JobDescription(responsibilities=["Lead and mentor a team of platform engineers."])
+    match = match_requirements(job, candidate)[0]
+    assert match.category == "Responsibility"
+    assert match.status == "matched"
+    assert match.evidence_class == "direct"
+    assert match.explanation
+    assert match.evidence[0].source == candidate.experience[0].company
+    assert match.evidence[0].text == lead_bullet
+
+
+def test_dimension_classification_and_job_propagation() -> None:
+    assert classify_dimension("Lead and mentor platform engineers") == "leadership"
+    assert classify_dimension("Define the multi-cloud strategy and roadmap") == "strategic_impact"
+    assert classify_dimension("Design scalable landing zones") == "architecture"
+    assert classify_dimension("Deliver migrations end-to-end") == "delivery"
+    assert classify_dimension("Healthcare domain compliance") == "domain"
+
+    job = JobDescription(responsibilities=["Lead and mentor platform engineers"])
+    match = match_requirements(job, CandidateProfile()).pop()
+    assert match.category == "Responsibility"
+    assert match.requirement == "Lead and mentor platform engineers"
+
+
+async def test_analyze_job_builds_dimensioned_responsibilities() -> None:
+    client = OllamaClient(Settings(llm_provider="none"))
+    job = await analyze_job(
+        "Lead and mentor platform engineers.\nDesign scalable landing zones.",
+        client,
+    )
+    dimensions = {item.dimension for item in job.responsibility_requirements}
+    assert {"leadership", "architecture"} <= dimensions
+    assert all(item.category == "Responsibility" for item in job.responsibility_requirements)

@@ -232,7 +232,11 @@ function renderAnalysis(detail) {
 
   const chips = $("top-chips");
   clear(chips);
-  const musts = analysis.matches.filter((item) => item.importance === "must_have");
+  const musts = analysis.matches.filter(
+    (item) =>
+      item.importance === "must_have" &&
+      !["Education", "Experience", "Responsibility", "Certification"].includes(item.category),
+  );
   musts.slice(0, 12).forEach((match) => {
     chips.appendChild(el("span", `chip ${match.status}`, match.skill));
   });
@@ -317,7 +321,8 @@ function skillLine(match) {
   line.appendChild(el("span", "skill-dot"));
   const body = el("div");
   body.appendChild(el("span", "", match.skill));
-  if (match.note) body.appendChild(el("span", "skill-note", match.note));
+  const explanation = match.explanation || match.note;
+  if (explanation) body.appendChild(el("span", "skill-note", explanation));
   line.appendChild(body);
   return line;
 }
@@ -346,7 +351,7 @@ function renderEvidence(analysis) {
     details.className = "evidence";
     const summary = document.createElement("summary");
     summary.appendChild(el("span", "", match.skill));
-    summary.appendChild(el("span", `chip ${match.status}`, match.status));
+    summary.appendChild(el("span", `chip ${match.status}`, match.evidence_class || match.status));
     details.appendChild(summary);
     const body = el("div", "evidence-body");
     match.evidence.forEach((evidence) => {

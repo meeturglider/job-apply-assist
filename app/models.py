@@ -120,6 +120,7 @@ class Requirement(BaseModel):
     importance: Literal["must_have", "nice_to_have"] = "must_have"
     weight: float = 1.0
     context: str = ""
+    dimension: str = "technical"
 
 
 class JobDescription(BaseModel):
@@ -135,6 +136,7 @@ class JobDescription(BaseModel):
     nice_to_have: list[Requirement] = Field(default_factory=list)
     education_requirements: list[Requirement] = Field(default_factory=list)
     experience_requirements: list[Requirement] = Field(default_factory=list)
+    responsibility_requirements: list[Requirement] = Field(default_factory=list)
     responsibilities: list[str] = Field(default_factory=list)
     certifications: list[Requirement] = Field(default_factory=list)
     keywords: dict[str, float] = Field(default_factory=dict)
@@ -156,6 +158,8 @@ class SkillMatch(BaseModel):
     evidence: list[Evidence] = Field(default_factory=list)
     confidence: float = 0.0
     note: str = ""
+    requirement: str = ""
+    explanation: str = ""
 
 
 class ScoreBreakdown(BaseModel):

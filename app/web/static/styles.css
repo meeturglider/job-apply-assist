@@ -592,19 +592,22 @@ h3 {
   font-size: 11px;
 }
 
-.chip.matched {
+.chip.matched,
+.chip.direct {
   border-color: rgba(52, 211, 153, 0.26);
   background: var(--green-soft);
   color: #a7f3d0;
 }
 
-.chip.partial {
+.chip.partial,
+.chip.adjacent {
   border-color: rgba(251, 191, 36, 0.28);
   background: var(--amber-soft);
   color: #fde68a;
 }
 
-.chip.missing {
+.chip.missing,
+.chip.contradicted {
   border-color: rgba(248, 113, 113, 0.28);
   background: var(--red-soft);
   color: #fecaca;

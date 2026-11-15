@@ -35,6 +35,7 @@ SUITABILITY_WEIGHT = (
     + CERTIFICATION_WEIGHT
     + SENIORITY_WEIGHT
 )
+NON_SKILL_CATEGORIES = {"Education", "Experience", "Responsibility", "Certification"}
 
 
 def _norm(value: str) -> str:
@@ -57,6 +58,8 @@ def _similar(left: str, right: str) -> bool:
 def _status_credit(match: SkillMatch | None) -> float:
     if match is None:
         return 0.0
+    if match.evidence_class == "contradicted":
+        return -0.25
     if match.status == "matched":
         return 1.0
     if match.status == "partial":
@@ -96,22 +99,12 @@ def _category_coverage(
     return sum(_status_credit(item) for item in relevant) / len(relevant), covered, len(relevant)
 
 
-def _responsibility_score(job: JobDescription, profile: CandidateProfile) -> tuple[float, int, int]:
-    if not job.responsibilities:
+def _responsibility_score(matches: list[SkillMatch]) -> tuple[float, int, int]:
+    relevant = [item for item in matches if item.category == "Responsibility"]
+    if not relevant:
         return 1.0, 0, 0
-    known = {lexicon.canonicalize(skill) for skill in profile.skills}
-    covered = 0
-    considered = 0
-    for responsibility in job.responsibilities:
-        found = [canonical for canonical, _ in lexicon.find(responsibility)]
-        if not found:
-            continue
-        considered += 1
-        if any(item in known for item in found):
-            covered += 1
-    if considered == 0:
-        return 1.0, 0, 0
-    return covered / considered, covered, considered
+    covered = sum(1 for item in relevant if _status_credit(item) > 0)
+    return sum(_status_credit(item) for item in relevant) / len(relevant), covered, len(relevant)
 
 
 def _certification_score(job: JobDescription, profile: CandidateProfile) -> tuple[float, int, int]:
@@ -251,22 +244,26 @@ def _recommendations(
     matched = [
         item.skill
         for item in matches
-        if item.status == "matched" and item.category not in {"Education", "Experience"}
+        if item.status == "matched" and item.category not in NON_SKILL_CATEGORIES
     ]
     partial = [
         item.skill
         for item in matches
-        if item.status == "partial" and item.category not in {"Education", "Experience"}
+        if item.status == "partial" and item.category not in NON_SKILL_CATEGORIES
     ]
     missing_must = [
         item.skill
         for item in matches
-        if item.importance == "must_have" and item.status == "missing"
+        if item.importance == "must_have"
+        and item.status == "missing"
+        and item.category not in NON_SKILL_CATEGORIES
     ]
     missing_nice = [
         item.skill
         for item in matches
-        if item.importance == "nice_to_have" and item.status == "missing"
+        if item.importance == "nice_to_have"
+        and item.status == "missing"
+        and item.category not in NON_SKILL_CATEGORIES
     ]
 
     if total >= 85:
@@ -342,7 +339,7 @@ def analyze_match(job: JobDescription, profile: CandidateProfile) -> AnalysisRes
     must_ratio, must_covered, must_total = _coverage_for_requirements(matches, job.must_have)
     nice_ratio, nice_covered, nice_total = _coverage_for_requirements(matches, job.nice_to_have)
     responsibility_ratio, responsibility_covered, responsibility_total = _responsibility_score(
-        job, profile
+        matches
     )
     experience_ratio, experience_covered, experience_total = _category_coverage(
         matches, "Experience"
@@ -441,22 +438,26 @@ def analyze_match(job: JobDescription, profile: CandidateProfile) -> AnalysisRes
     matched = [
         item.skill
         for item in matches
-        if item.status == "matched" and item.category not in {"Education", "Experience"}
+        if item.status == "matched" and item.category not in NON_SKILL_CATEGORIES
     ]
     partial = [
         item.skill
         for item in matches
-        if item.status == "partial" and item.category not in {"Education", "Experience"}
+        if item.status == "partial" and item.category not in NON_SKILL_CATEGORIES
     ]
     missing_must = [
         item.skill
         for item in matches
-        if item.importance == "must_have" and item.status == "missing"
+        if item.importance == "must_have"
+        and item.status == "missing"
+        and item.category not in NON_SKILL_CATEGORIES
     ]
     missing_nice = [
         item.skill
         for item in matches
-        if item.importance == "nice_to_have" and item.status == "missing"
+        if item.importance == "nice_to_have"
+        and item.status == "missing"
+        and item.category not in NON_SKILL_CATEGORIES
     ]
     warnings = [*job.warnings, *profile.warnings]
     if job.extraction_method == "heuristic":

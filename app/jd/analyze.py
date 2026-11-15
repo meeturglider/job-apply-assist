@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.llm import OllamaClient
+from app.matching.dimensions import classify_dimension
 from app.models import JobDescription, Requirement
 from app.prompts import load_prompt
 from app.skills import lexicon
@@ -168,12 +169,14 @@ def heuristic_requirements(
         ]
         first = positions[0] if positions else 0
         is_nice = preferred_at is not None and first > preferred_at
+        category = lexicon.category_for(canonical)
         requirement = Requirement(
             skill=canonical,
-            category=lexicon.category_for(canonical),
+            category=category,
             importance="nice_to_have" if is_nice else "must_have",
             weight=_skill_weight(count, not is_nice),
             context="",
+            dimension=classify_dimension(canonical, category),
         )
         if is_nice:
             nice.append(requirement)
@@ -224,6 +227,7 @@ def _detect_certifications(text: str) -> list[Requirement]:
                     importance="nice_to_have",
                     weight=1.0,
                     context="Mentioned in the job description.",
+                    dimension="certification",
                 )
             )
     return found
@@ -295,6 +299,7 @@ def _detect_education_requirements(text: str) -> list[Requirement]:
                 importance="must_have",
                 weight=1.5,
                 context="Mentioned in the job description.",
+                dimension="education",
             )
         )
     return found
@@ -317,6 +322,7 @@ def _detect_experience_requirements(text: str) -> list[Requirement]:
                 importance="must_have",
                 weight=1.5,
                 context="Mentioned in the job description.",
+                dimension="experience",
             )
         )
     return found
@@ -330,6 +336,7 @@ def _normalize_requirements(
     if not isinstance(values, list):
         return result
     for item in values:
+        dimension = ""
         if isinstance(item, str):
             skill = item.strip()
             category = ""
@@ -338,6 +345,7 @@ def _normalize_requirements(
         elif isinstance(item, dict):
             skill = str(item.get("skill", "")).strip()
             category = str(item.get("category", "")).strip()
+            dimension = str(item.get("dimension", "")).strip()
             try:
                 weight = float(item.get("weight", 1.0))
             except (TypeError, ValueError):
@@ -352,13 +360,15 @@ def _normalize_requirements(
         if key in seen:
             continue
         seen.add(key)
+        resolved_category = category or lexicon.category_for(canonical)
         result.append(
             Requirement(
                 skill=canonical,
-                category=category or lexicon.category_for(canonical),
+                category=resolved_category,
                 importance="must_have" if importance == "must_have" else "nice_to_have",
                 weight=max(0.5, min(weight, 2.0)),
                 context=context,
+                dimension=dimension or classify_dimension(canonical, resolved_category),
             )
         )
     return result
@@ -514,6 +524,18 @@ async def analyze_job(
     )
     if not responsibilities:
         responsibilities = _extract_responsibilities(text)
+    responsibility_requirements = [
+        Requirement(
+            skill=item,
+            category="Responsibility",
+            importance="must_have",
+            weight=1.0,
+            context="Derived from the job responsibilities.",
+            dimension=classify_dimension(item),
+        )
+        for item in responsibilities[:12]
+        if item.strip()
+    ]
 
     return JobDescription(
         title=resolved_title,
@@ -526,6 +548,7 @@ async def analyze_job(
         nice_to_have=nice,
         education_requirements=education_requirements,
         experience_requirements=experience_requirements,
+        responsibility_requirements=responsibility_requirements,
         responsibilities=responsibilities[:12],
         certifications=certifications,
         keywords=dict(sorted(keywords.items(), key=lambda item: -item[1])[:40]),
@@ -565,6 +588,9 @@ def job_prompt_payload(job: JobDescription) -> str:
             "nice_to_have": [item.model_dump() for item in job.nice_to_have],
             "education_requirements": [item.model_dump() for item in job.education_requirements],
             "experience_requirements": [item.model_dump() for item in job.experience_requirements],
+            "responsibility_requirements": [
+                item.model_dump() for item in job.responsibility_requirements
+            ],
             "responsibilities": job.responsibilities,
             "certifications": [item.model_dump() for item in job.certifications],
             "keywords": job.keywords,

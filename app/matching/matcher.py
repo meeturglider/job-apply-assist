@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
+from app.matching.dimensions import classify_dimension, dimension_hits, tokens
 from app.models import CandidateProfile, Evidence, JobDescription, Requirement, SkillMatch
 from app.skills import lexicon
 
@@ -47,6 +48,12 @@ CATEGORY_ALIASES = {
     "networking": {"Networking"},
 }
 
+NEGATION_RE = re.compile(
+    r"\b(?:no|not|never|without|lack(?:s|ed|ing)?|unfamiliar with|inexperienced with)\b",
+    re.IGNORECASE,
+)
+NOT_ONLY_RE = re.compile(r"\bnot only\b", re.IGNORECASE)
+
 
 def _search_aliases(text: str, aliases: list[str]) -> bool:
     for alias in sorted(set(aliases), key=len, reverse=True):
@@ -60,14 +67,54 @@ def _search_aliases(text: str, aliases: list[str]) -> bool:
     return False
 
 
-def _explain(requirement: Requirement, source: Requirement | None = None) -> str:
-    if source is None:
-        return "Direct evidence found in the resume or portfolio."
-    return f"Adjacent evidence found: {source.skill}."
+def _match(
+    requirement: Requirement,
+    *,
+    status: str,
+    evidence_class: str,
+    evidence: list[Evidence] | None = None,
+    confidence: float,
+    note: str,
+    category: str | None = None,
+) -> SkillMatch:
+    return SkillMatch(
+        skill=requirement.skill,
+        category=category if category is not None else requirement.category,
+        importance=requirement.importance,
+        status=status,  # type: ignore[arg-type]
+        evidence_class=evidence_class,  # type: ignore[arg-type]
+        evidence=evidence or [],
+        confidence=confidence,
+        note=note,
+        requirement=requirement.skill,
+        explanation=note,
+    )
 
 
-def _profile_canonical_skills(profile: CandidateProfile) -> dict[str, list[Evidence]]:
-    return profile.skills
+def _negative_mentions(text: str, aliases: list[str]) -> bool:
+    for alias in sorted(set(aliases), key=len, reverse=True):
+        pattern = re.escape(alias).replace(r"\ ", r"[\s-]+")
+        for match in re.finditer(
+            rf"(?<![a-z0-9]){pattern}(?![a-z0-9])",
+            text,
+            re.IGNORECASE,
+        ):
+            window = text[max(0, match.start() - 60) : min(len(text), match.end() + 30)]
+            if NEGATION_RE.search(window) and not NOT_ONLY_RE.search(window):
+                return True
+    return False
+
+
+def _find_contradiction(requirement: Requirement, profile: CandidateProfile) -> list[Evidence]:
+    canonical = lexicon.canonicalize(requirement.skill)
+    aliases = lexicon.aliases_for(canonical)
+    if canonical not in profile.skills:
+        aliases.append(requirement.skill)
+    matches: list[Evidence] = []
+    for item in profile.all_evidence():
+        if _negative_mentions(item.text, aliases):
+            matches.append(item)
+    return matches[:3]
 
 
 def _find_direct(requirement: Requirement, profile: CandidateProfile) -> list[Evidence]:
@@ -79,14 +126,14 @@ def _find_direct(requirement: Requirement, profile: CandidateProfile) -> list[Ev
     seen: set[str] = set()
     for _canonical, items in profile.skills.items():
         for item in items:
-            if _search_aliases(item.text, aliases):
+            if _search_aliases(item.text, aliases) and not _negative_mentions(item.text, aliases):
                 marker = f"{item.source}|{item.text}"
                 if marker not in seen:
                     matches.append(item)
                     seen.add(marker)
     if not matches:
         for item in profile.all_evidence():
-            if _search_aliases(item.text, aliases):
+            if _search_aliases(item.text, aliases) and not _negative_mentions(item.text, aliases):
                 marker = f"{item.source}|{item.text}"
                 if marker not in seen:
                     matches.append(item)
@@ -155,14 +202,13 @@ def _education_match(requirement: Requirement, profile: CandidateProfile) -> Ski
     lowered = text.casefold()
     evidence = _education_evidence(profile)
     if not evidence:
-        return SkillMatch(
-            skill=text,
-            category="Education",
-            importance=requirement.importance,
+        return _match(
+            requirement,
             status="missing",
             evidence_class="unverified",
             confidence=0.0,
             note="No education evidence found in the master resume.",
+            category="Education",
         )
 
     wants_advanced = bool(re.search(r"\b(master|mba|ph\.?d|doctorate)\b", lowered))
@@ -172,27 +218,25 @@ def _education_match(requirement: Requirement, profile: CandidateProfile) -> Ski
     related = bool(re.search(r"\b(related|equivalent|adjacent)\b", lowered))
 
     if wants_advanced and not _has_master_degree(profile):
-        return SkillMatch(
-            skill=text,
-            category="Education",
-            importance=requirement.importance,
+        return _match(
+            requirement,
             status="partial",
             evidence_class="adjacent",
             evidence=evidence[:2],
             confidence=0.5,
             note="Bachelor's degree found; the role asks for a more advanced degree.",
+            category="Education",
         )
 
     if (wants_bachelor or wants_advanced) and not _has_bachelor_degree(profile):
-        return SkillMatch(
-            skill=text,
-            category="Education",
-            importance=requirement.importance,
+        return _match(
+            requirement,
             status="partial",
             evidence_class="adjacent",
             evidence=evidence[:2],
             confidence=0.5,
             note="Education is present, but the degree level could not be confirmed.",
+            category="Education",
         )
 
     field_is_cs = bool(re.search(r"computer science|\bcs\b|software engineering", lowered))
@@ -202,40 +246,37 @@ def _education_match(requirement: Requirement, profile: CandidateProfile) -> Ski
         for term in ("computer science", "software engineering", "information technology", " cs ")
     )
     if field_is_cs and has_cs_field:
-        return SkillMatch(
-            skill=text,
-            category="Education",
-            importance=requirement.importance,
+        return _match(
+            requirement,
             status="matched",
             evidence_class="direct",
             evidence=evidence[:2],
             confidence=0.95,
             note="Degree field directly matches the requirement.",
+            category="Education",
         )
     if field_is_cs and not related:
-        return SkillMatch(
-            skill=text,
-            category="Education",
-            importance=requirement.importance,
+        return _match(
+            requirement,
             status="partial",
             evidence_class="adjacent",
             evidence=evidence[:2],
             confidence=0.6,
             note="Engineering degree is adjacent, but the JD asks for an exact CS field.",
+            category="Education",
         )
 
     note = "Degree requirement satisfied."
     if field_is_cs and related:
         note = "Engineering degree satisfies the related-field degree requirement."
-    return SkillMatch(
-        skill=text,
-        category="Education",
-        importance=requirement.importance,
+    return _match(
+        requirement,
         status="matched",
         evidence_class="direct",
         evidence=evidence[:2],
         confidence=0.9,
         note=note,
+        category="Education",
     )
 
 
@@ -257,14 +298,13 @@ def _required_years(text: str) -> int | None:
 def _experience_match(requirement: Requirement, profile: CandidateProfile) -> SkillMatch:
     text = requirement.skill
     if not profile.experience:
-        return SkillMatch(
-            skill=text,
-            category="Experience",
-            importance=requirement.importance,
+        return _match(
+            requirement,
             status="missing",
-            evidence_class="unverified",
-            confidence=0.0,
-            note="No professional experience found in the master resume.",
+            evidence_class="contradicted",
+            confidence=0.2,
+            note="The profile contains no professional experience entries.",
+            category="Experience",
         )
 
     years = round(profile.experience_years)
@@ -278,47 +318,114 @@ def _experience_match(requirement: Requirement, profile: CandidateProfile) -> Sk
     )
     required = _required_years(text)
     if required is None:
-        return SkillMatch(
-            skill=text,
-            category="Experience",
-            importance=requirement.importance,
+        return _match(
+            requirement,
             status="matched",
             evidence_class="direct",
             evidence=[evidence],
             confidence=0.8,
             note="Professional experience is present.",
+            category="Experience",
         )
     if years >= required:
-        return SkillMatch(
-            skill=text,
-            category="Experience",
-            importance=requirement.importance,
+        return _match(
+            requirement,
             status="matched",
             evidence_class="direct",
             evidence=[evidence],
             confidence=0.9,
             note=f"Computed experience rounds to {years} years.",
+            category="Experience",
         )
     if years + 1 >= required:
-        return SkillMatch(
-            skill=text,
-            category="Experience",
-            importance=requirement.importance,
+        return _match(
+            requirement,
             status="partial",
             evidence_class="adjacent",
             evidence=[evidence],
             confidence=0.5,
             note=f"Computed experience is {profile.experience_years:.1f} years.",
+            category="Experience",
         )
-    return SkillMatch(
-        skill=text,
+    return _match(
+        requirement,
+        status="missing",
+        evidence_class="contradicted",
+        evidence=[evidence],
+        confidence=0.2,
+        note=f"Computed experience is {profile.experience_years:.1f} years.",
         category="Experience",
-        importance=requirement.importance,
+    )
+
+
+def _responsibility_requirements(job: JobDescription) -> list[Requirement]:
+    if job.responsibility_requirements:
+        return job.responsibility_requirements
+    return [
+        Requirement(
+            skill=text,
+            category="Responsibility",
+            importance="must_have",
+            weight=1.0,
+            dimension=classify_dimension(text),
+        )
+        for text in job.responsibilities
+        if text.strip()
+    ]
+
+
+def _responsibility_match(requirement: Requirement, profile: CandidateProfile) -> SkillMatch:
+    dimension = requirement.dimension or classify_dimension(requirement.skill)
+    requirement_tokens = tokens(requirement.skill)
+    requirement_skills = {
+        lexicon.canonicalize(canonical) for canonical, _ in lexicon.find(requirement.skill)
+    }
+    direct: list[tuple[float, Evidence]] = []
+    adjacent: list[tuple[float, Evidence]] = []
+    for evidence in profile.all_evidence():
+        evidence_tokens = tokens(evidence.text)
+        shared = requirement_tokens & evidence_tokens
+        overlap = len(shared) / len(requirement_tokens) if requirement_tokens else 0.0
+        evidence_skills = {
+            lexicon.canonicalize(canonical) for canonical, _ in lexicon.find(evidence.text)
+        }
+        skill_hit = bool(requirement_skills & evidence_skills)
+        hits = dimension_hits(evidence.text, dimension)
+        score = overlap + min(hits, 2) * 0.15 + (0.2 if skill_hit else 0.0)
+        if hits and (skill_hit or overlap >= 0.2):
+            direct.append((score, evidence))
+        elif hits or skill_hit or overlap >= 0.3:
+            adjacent.append((score, evidence))
+
+    if direct:
+        direct.sort(key=lambda item: -item[0])
+        return _match(
+            requirement,
+            status="matched",
+            evidence_class="direct",
+            evidence=[item[1] for item in direct[:3]],
+            confidence=0.85,
+            note=f"Direct {dimension.replace('_', ' ')} evidence found in the profile.",
+            category="Responsibility",
+        )
+    if adjacent:
+        adjacent.sort(key=lambda item: -item[0])
+        return _match(
+            requirement,
+            status="partial",
+            evidence_class="adjacent",
+            evidence=[item[1] for item in adjacent[:3]],
+            confidence=0.5,
+            note=f"Adjacent {dimension.replace('_', ' ')} evidence found; scope may differ.",
+            category="Responsibility",
+        )
+    return _match(
+        requirement,
         status="missing",
         evidence_class="unverified",
-        evidence=[evidence],
         confidence=0.0,
-        note=f"Computed experience is {profile.experience_years:.1f} years.",
+        note=f"No {dimension.replace('_', ' ')} evidence found; this is not proof of absence.",
+        category="Responsibility",
     )
 
 
@@ -342,18 +449,29 @@ def match_requirements(job: JobDescription, profile: CandidateProfile) -> list[S
         if key in seen:
             continue
         seen.add(key)
+        contradiction = _find_contradiction(requirement, profile)
         direct = _find_direct(requirement, profile)
         if direct:
             matches.append(
-                SkillMatch(
-                    skill=requirement.skill,
-                    category=requirement.category,
-                    importance=requirement.importance,
+                _match(
+                    requirement,
                     status="matched",
                     evidence_class="direct",
                     evidence=direct,
                     confidence=0.95,
-                    note=_explain(requirement),
+                    note="Direct evidence found in the resume or portfolio.",
+                )
+            )
+            continue
+        if contradiction:
+            matches.append(
+                _match(
+                    requirement,
+                    status="missing",
+                    evidence_class="contradicted",
+                    evidence=contradiction,
+                    confidence=0.2,
+                    note="Profile evidence explicitly contradicts this requirement.",
                 )
             )
             continue
@@ -361,35 +479,33 @@ def match_requirements(job: JobDescription, profile: CandidateProfile) -> list[S
         if related:
             name, evidence = related[0]
             matches.append(
-                SkillMatch(
-                    skill=requirement.skill,
-                    category=requirement.category,
-                    importance=requirement.importance,
+                _match(
+                    requirement,
                     status="partial",
                     evidence_class="adjacent",
                     evidence=evidence,
                     confidence=0.55,
-                    note=_explain(
-                        requirement,
-                        Requirement(
-                            skill=name,
-                            category=requirement.category,
-                        ),
-                    ),
+                    note=f"Adjacent evidence found: {name}.",
                 )
             )
             continue
         matches.append(
-            SkillMatch(
-                skill=requirement.skill,
-                category=requirement.category,
-                importance=requirement.importance,
+            _match(
+                requirement,
                 status="missing",
                 evidence_class="unverified",
                 confidence=0.0,
-                note="No supporting evidence found.",
+                note="No supporting evidence found; this is not proof the skill is absent.",
             )
         )
+
+    responsibility_seen: set[str] = set()
+    for requirement in _responsibility_requirements(job):
+        key = lexicon.normalize(requirement.skill)
+        if not key or key in responsibility_seen:
+            continue
+        responsibility_seen.add(key)
+        matches.append(_responsibility_match(requirement, profile))
     return matches
 
 
