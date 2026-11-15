@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Apply Assist</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">JA</div>
+      <div>
+        <div class="brand-name">Job Apply Assist</div>
+        <div class="brand-sub">Evidence-based ATS tailoring</div>
+      </div>
+    </div>
+    <div class="status-strip">
+      <span class="pill" id="llm-status">Checking model...</span>
+      <span class="pill" id="profile-status">Loading profile...</span>
+      <button class="ghost-button" id="refresh-profile" type="button">Refresh profile</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Target job</h2>
+          <span class="micro">Step 1</span>
+        </div>
+        <form id="analyze-form">
+          <label class="field">
+            <span>Job URL</span>
+            <input id="job-url" type="url" placeholder="https://company.com/jobs/role" autocomplete="off">
+          </label>
+          <div class="divider"><span>or paste the JD</span></div>
+          <label class="field">
+            <span>Job description</span>
+            <textarea id="job-text" rows="7" placeholder="Paste the full job description here. LinkedIn pages usually need this fallback."></textarea>
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span>Company</span>
+              <input id="job-company" type="text" placeholder="Optional">
+            </label>
+            <label class="field">
+              <span>Role</span>
+              <input id="job-role" type="text" placeholder="Optional">
+            </label>
+          </div>
+          <button class="primary-button" id="analyze-button" type="submit">Analyze match</button>
+          <div class="form-error" id="form-error" hidden></div>
+        </form>
+      </section>
+
+      <section class="panel history-panel">
+        <div class="panel-heading">
+          <h2>History</h2>
+          <span class="micro">Local only</span>
+        </div>
+        <div id="history" class="history-list">
+          <div class="muted">No applications yet.</div>
+        </div>
+      </section>
+    </aside>
+
+    <section class="content">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-kicker">Apply smarter, not harder</div>
+        <h1>Match your evidence to the job before you write a word.</h1>
+        <p>
+          Paste a job URL or description. The assistant reads the JD, compares it with
+          <strong>MASTER_RESUME.md</strong> and your portfolio, then shows what is matched,
+          adjacent, and genuinely missing. Nothing is invented.
+        </p>
+        <div class="flow">
+          <div><span>1</span>Read JD</div>
+          <div><span>2</span>Match evidence</div>
+          <div><span>3</span>Review gaps</div>
+          <div><span>4</span>Generate ATS resume</div>
+        </div>
+      </div>
+
+      <div class="progress-card" id="progress-card" hidden>
+        <div class="progress-head">
+          <div>
+            <div class="micro" id="progress-stage">Working</div>
+            <h2 id="progress-message">Analyzing the role...</h2>
+          </div>
+          <div class="spinner" aria-hidden="true"></div>
+        </div>
+        <ol class="progress-steps" id="progress-steps">
+          <li>Fetch job description</li>
+          <li>Extract requirements</li>
+          <li>Load resume and portfolio</li>
+          <li>Match evidence and score</li>
+        </ol>
+      </div>
+
+      <div id="notice" class="notice" hidden></div>
+
+      <section class="result" id="result" hidden>
+        <div class="result-hero">
+          <div>
+            <div class="micro" id="result-company">Target role</div>
+            <h1 id="result-title">Role title</h1>
+            <p id="result-summary" class="result-summary"></p>
+          </div>
+          <div class="score-wrap">
+            <div class="score-ring" id="score-ring">
+              <div class="score-inner"><strong id="score-value">0%</strong><span>match</span></div>
+            </div>
+            <div class="score-label" id="score-label">Calculating</div>
+          </div>
+        </div>
+
+        <div class="chip-row" id="top-chips"></div>
+
+        <div class="breakdown-grid" id="breakdown"></div>
+
+        <div class="two-column">
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>Matched skills</h3>
+              <span class="micro" id="matched-count">0</span>
+            </div>
+            <div class="skill-list" id="matched-list"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>Gaps and partials</h3>
+              <span class="micro" id="missing-count">0</span>
+            </div>
+            <div class="skill-list" id="gap-list"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-heading">
+            <h3>Evidence map</h3>
+            <span class="micro">What supports each match</span>
+          </div>
+          <div id="evidence-list" class="evidence-list"></div>
+        </div>
+
+        <div class="two-column">
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>Recommendations</h3>
+            </div>
+            <ul class="recommendations" id="recommendations"></ul>
+          </div>
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>Keyword coverage</h3>
+              <span class="micro" id="keyword-pct">0%</span>
+            </div>
+            <div class="keyword-wrap" id="keyword-wrap"></div>
+          </div>
+        </div>
+
+        <div class="panel warning-panel" id="warning-panel" hidden>
+          <h3>Review warnings</h3>
+          <ul id="warnings"></ul>
+        </div>
+
+        <div class="action-bar">
+          <div>
+            <h3>Ready to proceed?</h3>
+            <p class="muted">The generator only uses facts already present in your resume and portfolio. Missing skills stay missing.</p>
+          </div>
+          <button class="primary-button" id="generate-button" type="button">Generate tailored resume</button>
+        </div>
+
+        <div class="generated" id="generated" hidden>
+          <div class="panel">
+            <div class="panel-heading">
+              <h3>Generated resume</h3>
+              <span class="pill success" id="generation-method">Ready</span>
+            </div>
+            <div class="download-row" id="downloads"></div>
+            <div class="preview-shell">
+              <iframe id="resume-preview" title="Tailored resume preview"></iframe>
+            </div>
+          </div>
+          <div class="two-column">
+            <div class="panel">
+              <div class="panel-heading"><h3>ATS self-check</h3></div>
+              <div id="ats-checks"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-heading"><h3>Truthfulness check</h3></div>
+              <div id="validation-checks"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

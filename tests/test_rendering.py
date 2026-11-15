@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from app.matching.scorer import analyze_match
+from app.models import (
+    CandidateProfile,
+    JobDescription,
+    Requirement,
+    ResumeExperience,
+    SkillGroup,
+    TailoredResume,
+)
+from app.rendering.docx import render_docx
+from app.rendering.html import resume_html
+from app.rendering.markdown import resume_markdown
+from app.tailoring.selection import deterministic_education, deterministic_summary, header_for
+
+
+def _resume(profile: CandidateProfile) -> TailoredResume:
+    job = JobDescription(must_have=[Requirement(skill="Kubernetes")])
+    return TailoredResume(
+        header=header_for(profile, job),
+        summary=deterministic_summary(profile, job, analyze_match(job, profile)),
+        skills=[SkillGroup(category="Cloud", items=["Kubernetes", "Terraform"])],
+        experience=[
+            ResumeExperience(
+                company="Example Corp",
+                role="Senior Platform Engineer",
+                start="Jan 2020",
+                end="Present",
+                bullets=["Built GCP landing zones with Terraform and Kubernetes."],
+            )
+        ],
+        education=deterministic_education(profile),
+    )
+
+
+def test_renders_markdown_html_and_docx(profile: CandidateProfile, tmp_path: Path) -> None:
+    resume = _resume(profile)
+    markdown = resume_markdown(resume)
+    html = resume_html(resume)
+    target = tmp_path / "resume.docx"
+    render_docx(resume, target)
+    assert "# Test Candidate" in markdown
+    assert "Kubernetes" in markdown
+    assert "<html" in html.casefold()
+    assert "single" not in html.casefold() or "table" not in html.casefold()
+    assert target.exists() and target.stat().st_size > 1000

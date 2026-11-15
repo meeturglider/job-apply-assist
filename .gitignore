@@ -1,0 +1,21 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+node_modules/
+
+# Local candidate cache, database, and generated applications contain personal data.
+data/
+generated/
+outputs/
+variants/
+
+# Playwright browser cache is outside the repo, but reports can appear here.
+playwright-report/

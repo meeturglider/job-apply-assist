@@ -1,363 +1,132 @@
-# Job Apply Assist 🚀
+# Job Apply Assist
 
-AI-powered ATS Optimization & Career Engineering Platform
+Local, evidence-based ATS resume tailoring. Paste a job description (or fetch a public
+posting URL), compare it with `MASTER_RESUME.md` and your portfolio, review the match
+report, then generate a truthfulness-checked resume in PDF, DOCX, and Markdown.
 
----
+The app never invents experience, skills, metrics, or certifications. Every generated
+claim is checked against your source resume and portfolio. When the local LLM produces
+an unsupported claim, the sanitizer removes it or falls back to deterministic selection.
 
-# Vision
+## Quick Start
 
-`job-apply-assist` is an AI-assisted career optimization system designed to help engineers and architects apply smarter — not harder.
+Requirements:
 
-Instead of mass-applying with generic resumes, this platform focuses on:
+- Python 3.11+
+- Ollama (optional but recommended for higher-quality tailoring)
+- Chromium for PDF output (installed once through Playwright)
 
-* Intelligent job filtering
-* ATS-aware resume tailoring
-* AI-assisted JD analysis
-* Resume generation
-* Application tracking
-* Callback optimization
-* Career analytics
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+playwright install chromium
 
-The long-term goal is to build a precision-driven application workflow powered by AI, automation, and engineering systems thinking.
+# Optional: start Ollama and pull a model
+ollama serve
+ollama pull qwen3:8b
 
----
-
-# Problem Statement
-
-Modern hiring pipelines are heavily dependent on:
-
-* ATS (Applicant Tracking Systems)
-* Keyword matching
-* Recruiter skim-reading
-* Role-specific resume alignment
-
-Many technically strong candidates fail to receive callbacks because:
-
-* resumes are generic
-* ATS keywords are missing
-* experience is poorly aligned
-* recruiter readability is weak
-* applications are not optimized per role
-
-This project aims to solve that problem.
-
----
-
-# High-Level Architecture
-
-```text
-Job Discovery
-     ↓
-JD Scraper
-     ↓
-AI Analyzer
-     ↓
-Resume Tailoring
-     ↓
-PDF Export
-     ↓
-Apply
-     ↓
-Outcome Tracking
-     ↓
-Analytics + Optimization
+cp .env.example .env
+uvicorn app.main:app --host 127.0.0.1 --port 8765
 ```
 
----
+Open `http://127.0.0.1:8765`.
 
-# Core Workflow
+Local LLM extraction and tailoring can take 1-4 minutes per run on an 8B model. The UI
+runs these as background jobs and polls for progress, so the page stays responsive.
 
-## 1. Intelligent Job Discovery
+The app expects `MASTER_RESUME.md` in the working directory. Run commands from the
+repository root so relative paths resolve correctly.
 
-Only relevant opportunities are targeted.
+## CLI
 
-Focus areas:
-
-* Product companies
-* Engineering-focused organizations
-* Cloud & Platform Engineering
-* DevOps
-* SRE
-* AI Infrastructure
-* Enterprise banking engineering teams
-
-Future integrations:
-
-* LinkedIn Alerts
-* Gmail parsing
-* RSS feeds
-* Company career portals
-* OpenClaw workflows
-
----
-
-# 2. Job Description (JD) Analysis
-
-Input:
-
-* Job description text
-* Job posting URL
-
-The AI analyzer:
-
-* extracts ATS keywords
-* identifies role category
-* detects required skills
-* identifies certifications
-* highlights missing skills
-* generates recruiter-focused insights
-
----
-
-# 3. ATS Optimization Engine
-
-The system compares:
-
-```text
-JD ↔ MASTER_RESUME.md
+```bash
+job-assist serve
+job-assist profile --refresh
+job-assist analyze --url https://example.com/jobs/123
+job-assist analyze --text job-description.txt
+job-assist analyze --text - --no-generate < job-description.txt
 ```
 
-and generates:
+Generated artifacts are written to `data/applications/<application-id>/` and indexed in
+`data/applications.db`. These contain personal data and are gitignored.
 
-* ATS match score
-* keyword overlap analysis
-* missing skill analysis
-* recruiter confidence estimation
-* optimization suggestions
+## How It Works
 
-Example:
+1. Fetch or accept a job description. LinkedIn and auth-walled pages fall back to
+   manual paste.
+2. Extract requirements with the local LLM, falling back to deterministic extraction.
+3. Normalize skills through the alias lexicon in `app/data/skills.yaml`.
+4. Match requirements against resume bullets, projects, certifications, and portfolio
+   evidence.
+5. Score must-have/nice-to-have coverage, responsibilities, certifications, seniority,
+   and keyword coverage.
+6. Show matched, partial, and missing skills with supporting evidence.
+7. On request, build a tailored resume with a strict source-evidence prompt.
+8. Validate and sanitize the result, then render Markdown, HTML, DOCX, and PDF.
+9. Run ATS checks on the PDF (selectable text, page length, sections, tables, keyword
+   coverage) and store the report.
 
-```text
-ATS Match Score: 84%
+## Configuration
 
-Strong Areas:
-- Kubernetes
-- Terraform
-- GCP
-- Platform Engineering
+See `.env.example`. Key settings:
 
-Missing Skills:
-- ArgoCD
-- Splunk
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LLM_PROVIDER` | `ollama` | Set to `none` for deterministic-only mode. |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama endpoint. |
+| `OLLAMA_MODEL` | `qwen3:8b` | Model used for extraction and tailoring. |
+| `OLLAMA_TIMEOUT_SECONDS` | `300` | Per-request timeout. |
+| `MASTER_RESUME_PATH` | `MASTER_RESUME.md` | Canonical resume source. |
+| `PORTFOLIO_BASE_URL` | `https://hari.is-a.dev` | Portfolio base URL. |
+| `DATA_DIR` | `data` | Database, cache, and generated artifacts. |
+
+## Development
+
+```bash
+pytest
+ruff check app tests
+ruff format --check app tests
+mypy app
 ```
 
----
+## Current Scope
 
-# 4. Resume Tailoring Engine
+Included:
 
-The system dynamically generates role-specific resumes based on:
+- JD URL fetch with manual-paste fallback
+- Local LLM + deterministic analysis and tailoring
+- Profile merge across resume, portfolio JSON, and JSON-LD
+- Match scoring with evidence
+- PDF, DOCX, HTML, and Markdown exports
+- Truthfulness validation and sanitization
+- ATS checks and application history
 
-* Cloud Architect
-* Platform Engineer
-* DevOps Engineer
-* SRE
-* AI Infrastructure Engineer
+Not included:
 
-Generated resumes:
+- Automatic job applications
+- LinkedIn credential automation or scraping behind a login
+- Fabricated metrics, skills, or experience
+- Recruiter/outcome analytics beyond the local application index
 
-* surface relevant experience
-* optimize ATS keyword density
-* improve recruiter readability
-* preserve technical authenticity
-
----
-
-# 5. PDF Resume Generation
-
-Automatically generates recruiter-ready resumes:
+## Project Layout
 
 ```text
-generated/google_platform_engineer_resume.pdf
+app/
+├── config.py, models.py, service.py, store.py, llm.py, prompts.py
+├── data/skills.yaml
+├── jd/            # URL fetch, extraction, analysis
+├── matching/      # evidence matching and scoring
+├── profile/       # resume parsing, portfolio fetch, merge
+├── rendering/     # Markdown, HTML, DOCX, PDF, ATS checks
+├── tailoring/     # selection, LLM build, validation, sanitization
+└── web/           # single-page local UI
+prompts/           # extraction and tailoring prompts
+tests/             # hermetic unit and service tests
+MASTER_RESUME.md   # canonical resume source
 ```
 
-Future enhancements:
+## Philosophy
 
-* multi-template support
-* recruiter-specific formatting
-* company-specific resume variants
-
----
-
-# 6. Manual High-Quality Application Workflow
-
-This platform intentionally avoids:
-
-* mass spam applications
-* fake keyword stuffing
-* dishonest experience inflation
-
-Instead, the goal is:
-
-* targeted applications
-* ATS-aware optimization
-* recruiter-friendly resumes
-* precision application engineering
-
----
-
-# 7. Outcome Tracking & Feedback Loop
-
-This is one of the most important components.
-
-The system tracks:
-
-* applications submitted
-* ATS score
-* resume version used
-* callbacks
-* rejections
-* interviews
-* recruiter interactions
-* response times
-
-Example:
-
-| Company   | Role              | ATS Score | Status    |
-| --------- | ----------------- | --------- | --------- |
-| Google    | Platform Engineer | 82%       | Rejected  |
-| JPMorgan  | Cloud Architect   | 91%       | Interview |
-| Atlassian | SRE               | 76%       | Pending   |
-
----
-
-# 8. Analytics & Optimization Engine
-
-Over time, the system will identify:
-
-* which resume variants perform better
-* which ATS keywords correlate with callbacks
-* which companies respond positively
-* which role categories align best
-* callback-to-application ratios
-
-Long-term vision:
-
-```text
-AI-assisted career intelligence system
-```
-
----
-
-# Tech Stack
-
-## AI & LLM
-
-* Ollama
-* Qwen2.5-Coder
-* Local LLM workflows
-
-## Backend
-
-* Python
-
-## Automation
-
-* OpenClaw
-* Shell scripting
-
-## Storage
-
-* Markdown
-* SQLite (planned)
-
-## Hosting
-
-* GitHub Pages
-
-## Resume Engineering
-
-* Markdown-based resumes
-* Git versioning
-* ATS optimization workflows
-
----
-
-# Repository Structure
-
-```text
-job-apply-assist/
-│
-├── MASTER_RESUME.md
-├── README.md
-├── requirements.txt
-│
-├── docs/
-│
-├── prompts/
-│   ├── jd_analysis_prompt.txt
-│   └── resume_tailor_prompt.txt
-│
-├── job_descriptions/
-│
-├── outputs/
-│
-├── scripts/
-│   ├── jd_analyzer.py
-│   ├── resume_tailor.py
-│   ├── ats_scorer.py
-│   └── pdf_export.py
-│
-├── generated/
-│
-└── variants/
-```
-
----
-
-# Strategic Goals
-
-This project is designed to become:
-
-* an ATS optimization platform
-* a resume engineering system
-* an AI-assisted job application pipeline
-* a career analytics engine
-* a portfolio-grade engineering project
-
----
-
-# Long-Term Vision
-
-Future roadmap:
-
-* LinkedIn job ingestion
-* Gmail automation
-* OpenClaw integrations
-* Telegram notifications
-* AI-powered callback prediction
-* recruiter analytics
-* dashboard visualizations
-* autonomous opportunity discovery
-
----
-
-# Philosophy
-
-This project is built around one core principle:
-
-```text
-Apply smarter, not harder.
-```
-
-The goal is not mass application spam.
-
-The goal is:
-
-* precision
-* optimization
-* authenticity
-* visibility
-* engineering-driven career growth
-
----
-
-# Author
-
-Harisankar
-Senior Cloud Architect | Platform Engineering | AI Infrastructure
-
-Portfolio:
-https://meeturglider.github.io
-
-GitHub:
-https://github.com/meeturglider
+Apply smarter, not harder. Tailor deliberately, keep every claim grounded, and keep
+personal data local.
