@@ -309,21 +309,12 @@ def validate_resume(
 
     allowed_awards = " ".join(profile.awards).casefold()
     for award in resume.awards:
-        if profile.awards and award.casefold() not in allowed_awards:
+        if award.casefold() not in allowed_awards:
             issues.append(
                 ValidationIssue(
-                    severity="warning",
                     location="awards",
-                    message=f"Award may not match the profile: {award}",
-                    requires_review=True,
-                )
-            )
-            review_items.append(
-                ReviewItem(
-                    location="awards",
-                    claim=award,
+                    message=f"Unsupported award: {award}",
                     claim_type="award",
-                    reason="Award text does not exactly match the profile and needs review.",
                     source="Awards",
                 )
             )

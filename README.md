@@ -52,7 +52,9 @@ job-assist analyze --text - --no-generate < job-description.txt
 ```
 
 Generated artifacts are written to `data/applications/<application-id>/` and indexed in
-`data/applications.db`. These contain personal data and are gitignored.
+`data/applications.db`. These contain personal data and are gitignored. On POSIX systems
+the app restricts the data directories to the current user and the database to owner-only
+access.
 
 ## How It Works
 
@@ -80,7 +82,10 @@ See `.env.example`. Key settings:
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama endpoint. |
 | `OLLAMA_MODEL` | `qwen3:8b` | Model used for extraction and tailoring. |
 | `OLLAMA_TIMEOUT_SECONDS` | `300` | Per-request timeout. |
+| `OLLAMA_MAX_RETRIES` | `1` | Retries for malformed or failed LLM JSON responses. |
+| `OLLAMA_RETRY_BACKOFF_SECONDS` | `1` | Base backoff between LLM retries. |
 | `MASTER_RESUME_PATH` | `MASTER_RESUME.md` | Canonical resume source. |
+| `LOG_LEVEL` | `INFO` | Application log level. |
 | `PORTFOLIO_BASE_URL` | `https://hari.is-a.dev` | Portfolio base URL. |
 | `DATA_DIR` | `data` | Database, cache, and generated artifacts. |
 
@@ -92,6 +97,9 @@ ruff check app tests
 ruff format --check app tests
 mypy app
 ```
+
+See [`docs/engineering-report.md`](docs/engineering-report.md) for the refinement
+architecture, validation matrix, operational notes, and known limitations.
 
 ## Current Scope
 

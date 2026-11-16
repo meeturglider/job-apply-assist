@@ -147,6 +147,20 @@ def _merge_list(left: list[str], right: list[str]) -> list[str]:
     return result
 
 
+def _merge_awards(left: list[str], right: list[str]) -> list[str]:
+    result = list(left)
+    for value in right:
+        marker = _key(value)
+        if not marker or marker in {_key(item) for item in result}:
+            continue
+        match = next((item for item in result if _similar(item, value, 0.7)), None)
+        if match is None:
+            result.append(value)
+        elif len(value) > len(match):
+            result[result.index(match)] = value
+    return result
+
+
 def _start_sort_key(value: str) -> tuple[int, int]:
     match = re.match(r"([A-Z][a-z]{2})\s+(\d{4})", value)
     if not match:
@@ -213,7 +227,7 @@ def build_profile(master_path: Path, portfolio: PortfolioSnapshot | None) -> Can
         projects=projects,
         certifications=certifications,
         education=master.education,
-        awards=_merge_list(master.awards, portfolio_profile.awards),
+        awards=_merge_awards(master.awards, portfolio_profile.awards),
         skills=skills,
         skill_categories={key: value for key, value in lexicon.categories.items()},
         sources={**master.sources, **portfolio_profile.sources},

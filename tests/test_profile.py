@@ -35,3 +35,16 @@ def test_duration_warning_is_raised_when_text_is_stale(master_text: str) -> None
     text = master_text.replace("Platform engineer with", "16+ years platform engineer with")
     profile = parse_master_resume_text(text)
     assert any("hardcoded experience duration" in warning for warning in profile.warnings)
+
+
+def test_award_merge_dedupes_near_duplicate_variants() -> None:
+    from app.profile.merge import _merge_awards
+
+    merged = _merge_awards(
+        ["Best Performer – Quarterly Award – Cisco Systems"],
+        ["Best Performer — Quarterly, Cisco Systems", "Best Performer – Annual – Cisco Systems"],
+    )
+    assert merged == [
+        "Best Performer – Quarterly Award – Cisco Systems",
+        "Best Performer – Annual – Cisco Systems",
+    ]
