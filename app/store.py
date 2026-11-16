@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from pathlib import Path
@@ -12,11 +13,16 @@ class ApplicationStore:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init()
+        self._secure_database()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         return connection
+
+    def _secure_database(self) -> None:
+        with contextlib.suppress(OSError):
+            self.path.chmod(0o600)
 
     def _init(self) -> None:
         with self._connect() as connection:
@@ -49,6 +55,7 @@ class ApplicationStore:
                     payload,
                 ),
             )
+        self._secure_database()
 
     def get(self, application_id: str) -> ApplicationRecord | None:
         with self._connect() as connection:

@@ -64,3 +64,41 @@ def test_binary_artifact_always_downloads(tmp_path: Path) -> None:
     assert response.headers["content-disposition"].startswith("attachment")
     assert response.headers["cache-control"] == "no-store"
     assert response.content == pdf
+
+
+def test_api_errors_include_codes_and_request_ids(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    with TestClient(app) as client:
+        missing = client.get(
+            "/api/applications/missing",
+            headers={"X-Request-ID": "request-123"},
+        )
+        assert missing.status_code == 404
+        assert missing.json()["code"] == "not_found"
+        assert missing.json()["request_id"] == "request-123"
+        assert missing.headers["x-request-id"] == "request-123"
+        assert missing.headers["cache-control"] == "no-store"
+
+        empty = client.post("/api/analyze", json={})
+        assert empty.status_code == 422
+        assert empty.json()["code"] == "validation_error"
+        assert empty.json()["request_id"]
+
+        oversized = client.post("/api/analyze", json={"text": "x" * 100_001})
+        assert oversized.status_code == 422
+        assert oversized.json()["code"] == "validation_error"
+
+
+def test_unhandled_errors_do_not_leak_internal_details(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+
+    @app.get("/api/explode")
+    async def explode() -> None:
+        raise RuntimeError("sensitive internal detail")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/explode")
+    assert response.status_code == 500
+    assert response.json()["code"] == "internal_error"
+    assert "sensitive internal detail" not in response.text
+    assert response.headers["x-request-id"]

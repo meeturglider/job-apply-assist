@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -29,6 +30,8 @@ from app.rendering.markdown import resume_markdown
 from app.rendering.pdf import RenderError, render_pdf
 from app.store import ApplicationStore
 from app.tailoring.builder import build_resume
+
+logger = logging.getLogger(__name__)
 
 
 def _slug(value: str) -> str:
@@ -63,6 +66,10 @@ class ApplicationService:
             model=self.settings.ollama_model,
         )
         self.store.save(record)
+        logger.info(
+            "application_created",
+            extra={"application_id": application_id, "has_url": bool(source_url)},
+        )
         return record
 
     def _update(self, record: ApplicationRecord, **fields: object) -> ApplicationRecord:
@@ -79,7 +86,28 @@ class ApplicationService:
 
     def _track(self, task: asyncio.Task[None]) -> None:
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+
+        def done(completed: asyncio.Task[None]) -> None:
+            self._tasks.discard(completed)
+            if completed.cancelled():
+                logger.info("background_task_cancelled")
+                return
+            error = completed.exception()
+            if error is not None:
+                logger.error(
+                    "background_task_failed",
+                    exc_info=(type(error), error, error.__traceback__),
+                )
+
+        task.add_done_callback(done)
+
+    async def shutdown(self) -> None:
+        tasks = [task for task in self._tasks if not task.done()]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info("service_stopped", extra={"cancelled_tasks": len(tasks)})
 
     def start_analysis(
         self,
@@ -108,6 +136,7 @@ class ApplicationService:
         record = self.store.get(application_id)
         if record is None:
             return
+        logger.info("analysis_started", extra={"application_id": application_id})
         try:
             self._update(
                 record,
@@ -169,6 +198,10 @@ class ApplicationService:
                 profile_hash=ProfileService.hash(profile),
             )
         except ManualPasteRequired as exc:
+            logger.warning(
+                "analysis_needs_manual_paste",
+                extra={"application_id": application_id},
+            )
             self._update(
                 record,
                 status="needs_paste",
@@ -177,6 +210,10 @@ class ApplicationService:
                 error=exc.message,
             )
         except FetchError as exc:
+            logger.warning(
+                "analysis_fetch_failed",
+                extra={"application_id": application_id, "error": str(exc)},
+            )
             self._update(
                 record,
                 status="error",
@@ -184,13 +221,14 @@ class ApplicationService:
                 message=str(exc),
                 error=str(exc),
             )
-        except Exception as exc:
+        except Exception:
+            logger.exception("analysis_failed", extra={"application_id": application_id})
             self._update(
                 record,
                 status="error",
                 stage="error",
-                message=f"Analysis failed: {exc}",
-                error=str(exc),
+                message="Analysis failed unexpectedly. Check the app logs for details.",
+                error="internal_error",
             )
 
     async def _ingest(self, *, url: str, text: str) -> JobExtraction:
@@ -226,6 +264,7 @@ class ApplicationService:
             raise ValueError("Application not found.")
         if record.status not in {"analyzed", "generated"}:
             raise ValueError("Analyze the job before generating a resume.")
+        logger.info("generation_started", extra={"application_id": application_id})
         self._update(
             record,
             status="generating",
@@ -241,6 +280,7 @@ class ApplicationService:
         if record is None:
             return
         directory = self._directory(application_id)
+        logger.info("generation_rendering", extra={"application_id": application_id})
         try:
             job = JobDescription.model_validate_json(
                 (directory / "job.json").read_text(encoding="utf-8")
@@ -356,13 +396,22 @@ class ApplicationService:
                 error=pdf_error,
                 artifacts=artifacts,
             )
-        except Exception as exc:
+            logger.info(
+                "generation_completed",
+                extra={
+                    "application_id": application_id,
+                    "method": method,
+                    "artifact_count": len(artifacts),
+                },
+            )
+        except Exception:
+            logger.exception("generation_failed", extra={"application_id": application_id})
             self._update(
                 record,
                 status="error",
                 stage="error",
-                message=f"Resume generation failed: {exc}",
-                error=str(exc),
+                message="Resume generation failed unexpectedly. Check the app logs for details.",
+                error="internal_error",
             )
 
     def _artifact(self, directory: Path, kind: str, filename: str) -> ArtifactInfo:

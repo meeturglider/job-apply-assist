@@ -1,37 +1,180 @@
 from __future__ import annotations
 
+import logging
+import time
+import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import Settings, settings
 from app.service import ApplicationService
 
 WEB_DIR = Path(__file__).parent / "web"
 STATIC_DIR = WEB_DIR / "static"
+logger = logging.getLogger(__name__)
 
 
 class AnalyzeRequest(BaseModel):
-    url: str = ""
-    text: str = ""
-    company: str = ""
-    role: str = ""
+    url: str = Field(default="", max_length=2048)
+    text: str = Field(default="", max_length=100_000)
+    company: str = Field(default="", max_length=200)
+    role: str = Field(default="", max_length=200)
+
+
+def _configure_logging(level: str) -> None:
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(
+            level=level.upper(),
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        )
+    else:
+        root.setLevel(level.upper())
+
+
+def _request_id(request: Request) -> str:
+    candidate = request.headers.get("x-request-id", "").strip()
+    if (
+        candidate
+        and len(candidate) <= 64
+        and all(character.isalnum() or character in "-_." for character in candidate)
+    ):
+        return candidate
+    return uuid.uuid4().hex[:12]
+
+
+def _error_code(status_code: int) -> str:
+    return {
+        404: "not_found",
+        409: "conflict",
+        413: "payload_too_large",
+        422: "validation_error",
+    }.get(status_code, "request_error")
+
+
+def _error_payload(request: Request, detail: Any, code: str) -> dict[str, Any]:
+    return {
+        "detail": detail,
+        "code": code,
+        "request_id": getattr(request.state, "request_id", ""),
+    }
 
 
 def create_app(custom_settings: Settings | None = None) -> FastAPI:
     active_settings = custom_settings or settings
+    _configure_logging(active_settings.log_level)
     active_settings.ensure_dirs()
+    service = ApplicationService(active_settings)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        logger.info(
+            "service_started",
+            extra={
+                "llm_provider": active_settings.llm_provider,
+                "llm_model": active_settings.ollama_model,
+            },
+        )
+        try:
+            yield
+        finally:
+            await service.shutdown()
+
     app = FastAPI(
         title="Job Apply Assist",
         description="Local, evidence-based ATS resume tailoring",
         version="0.1.0",
+        lifespan=lifespan,
     )
-    service = ApplicationService(active_settings)
     app.state.service = service
     app.state.settings = active_settings
+
+    @app.middleware("http")
+    async def request_context(request: Request, call_next):
+        request.state.request_id = _request_id(request)
+        started = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            logger.exception(
+                "http_request_unhandled",
+                extra={
+                    "request_id": request.state.request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                },
+            )
+            raise
+        response.headers["X-Request-ID"] = request.state.request_id
+        if request.url.path.startswith("/api/"):
+            response.headers.setdefault("Cache-Control", "no-store")
+            logger.info(
+                "http_request",
+                extra={
+                    "request_id": request.state.request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                },
+            )
+        return response
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        detail = exc.detail if isinstance(exc.detail, str) else "Request failed."
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=_error_payload(request, detail, _error_code(exc.status_code)),
+            headers=exc.headers,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        errors = [
+            {
+                "loc": [str(part) for part in error.get("loc", [])],
+                "msg": str(error.get("msg", "Invalid value.")),
+                "type": str(error.get("type", "invalid")),
+            }
+            for error in exc.errors()
+        ]
+        return JSONResponse(
+            status_code=422,
+            content=_error_payload(
+                request,
+                {"message": "Request validation failed.", "errors": errors},
+                "validation_error",
+            ),
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        logger.exception(
+            "http_request_failed",
+            extra={
+                "request_id": getattr(request.state, "request_id", ""),
+                "method": request.method,
+                "path": request.url.path,
+            },
+        )
+        return JSONResponse(
+            status_code=500,
+            content=_error_payload(
+                request,
+                "Internal server error. Check the app logs for details.",
+                "internal_error",
+            ),
+            headers={"X-Request-ID": getattr(request.state, "request_id", "")},
+        )
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

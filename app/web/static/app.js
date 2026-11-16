@@ -27,7 +27,19 @@ async function api(path, options = {}) {
     let detail = `Request failed (${response.status})`;
     try {
       const body = await response.json();
-      detail = body.detail || detail;
+      const payload = body.detail;
+      if (typeof payload === "string") {
+        detail = payload;
+      } else if (payload && typeof payload === "object") {
+        detail = payload.message || detail;
+        if (Array.isArray(payload.errors) && payload.errors.length) {
+          const first = payload.errors[0];
+          if (first && first.msg) detail += ` ${first.msg}`;
+        }
+      }
+      if (body.request_id) {
+        detail += ` (request ${body.request_id})`;
+      }
     } catch (_) {
       // Keep the status message.
     }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 from pydantic import Field
@@ -15,6 +16,7 @@ class Settings(BaseSettings):
 
     app_host: str = "127.0.0.1"
     app_port: int = 8765
+    log_level: str = "INFO"
 
     llm_provider: str = "ollama"
     ollama_base_url: str = "http://localhost:11434"
@@ -48,10 +50,16 @@ class Settings(BaseSettings):
     def database_path(self) -> Path:
         return self.data_dir / "applications.db"
 
+    @staticmethod
+    def _secure_directory(path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            path.chmod(0o700)
+
     def ensure_dirs(self) -> None:
-        self.applications_dir.mkdir(parents=True, exist_ok=True)
-        self.profile_dir.mkdir(parents=True, exist_ok=True)
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._secure_directory(self.data_dir)
+        self._secure_directory(self.applications_dir)
+        self._secure_directory(self.profile_dir)
 
 
 settings = Settings()
