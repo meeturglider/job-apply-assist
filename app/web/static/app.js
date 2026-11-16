@@ -418,9 +418,10 @@ function renderGenerated(detail) {
   artifacts.forEach((artifact) => {
     const link = document.createElement("a");
     link.className = "download-button";
-    link.href = `/api/applications/${record.id}/artifacts/${artifact.filename}`;
+    link.href = `/api/applications/${record.id}/artifacts/${artifact.filename}?download=1`;
     link.textContent = labels[artifact.kind] || artifact.filename;
-    link.target = artifact.kind === "html" ? "_blank" : "_self";
+    link.target = "_self";
+    link.setAttribute("download", artifact.filename);
     downloads.appendChild(link);
   });
 

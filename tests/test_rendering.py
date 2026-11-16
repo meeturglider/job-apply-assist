@@ -11,6 +11,7 @@ from app.models import (
     SkillGroup,
     TailoredResume,
 )
+from app.rendering.ats import check_docx
 from app.rendering.docx import render_docx
 from app.rendering.html import resume_html
 from app.rendering.markdown import resume_markdown
@@ -50,3 +51,6 @@ def test_renders_markdown_html_and_docx(profile: CandidateProfile, tmp_path: Pat
     assert "&lt;span" not in html
     assert 'class="contact"' in html
     assert target.exists() and target.stat().st_size > 1000
+    checks = check_docx(resume, target)
+    assert checks
+    assert all(check.passed for check in checks)

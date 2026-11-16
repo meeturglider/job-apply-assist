@@ -22,7 +22,7 @@ from app.models import (
     ValidationReport,
 )
 from app.profile.service import ProfileService
-from app.rendering.ats import check_ats
+from app.rendering.ats import check_ats, check_docx
 from app.rendering.docx import render_docx
 from app.rendering.html import resume_html
 from app.rendering.markdown import resume_markdown
@@ -282,18 +282,34 @@ class ApplicationService:
             except RenderError as exc:
                 pdf_error = str(exc)
             if pdf_error:
-                ats_report = AtsReport(
-                    checks=[
+                checks = [
+                    AtsCheck(
+                        name="PDF rendering",
+                        passed=False,
+                        detail=pdf_error,
+                    )
+                ]
+                try:
+                    checks.extend(check_docx(resume, directory / "resume.docx"))
+                except Exception as exc:
+                    checks.append(
                         AtsCheck(
-                            name="PDF rendering",
+                            name="DOCX text extraction",
                             passed=False,
-                            detail=pdf_error,
+                            detail=f"DOCX verification failed: {exc}",
                         )
-                    ]
-                )
+                    )
+                ats_report = AtsReport(checks=checks)
             else:
                 try:
-                    ats_report = check_ats(resume, markdown, directory / "resume.pdf", job, html)
+                    ats_report = check_ats(
+                        resume,
+                        markdown,
+                        directory / "resume.pdf",
+                        job,
+                        html,
+                        directory / "resume.docx",
+                    )
                 except Exception as exc:
                     ats_report = AtsReport(
                         checks=[

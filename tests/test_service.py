@@ -43,6 +43,8 @@ async def test_analyze_and_generate_end_to_end(tmp_path: Path, master_text: str)
     payload = service.analysis_payload(record.id)
     assert "metadata" in payload
     assert payload["metadata"]["method"] == "deterministic"
+    ats_checks = payload["metadata"]["ats"]["checks"]
+    assert any(check["name"] == "DOCX text extraction" for check in ats_checks)
 
 
 async def _wait(

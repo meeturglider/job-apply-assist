@@ -109,7 +109,11 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         return {"application": record.model_dump(mode="json")}
 
     @app.get("/api/applications/{application_id}/artifacts/{filename}")
-    async def artifact(application_id: str, filename: str) -> FileResponse:
+    async def artifact(
+        application_id: str,
+        filename: str,
+        download: bool = False,
+    ) -> FileResponse:
         try:
             path = service.artifact_path(application_id, filename)
         except FileNotFoundError as exc:
@@ -120,10 +124,17 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             ".md": "text/markdown",
             ".html": "text/html",
         }
+        previewable = {".html", ".md"}
+        disposition = "inline" if path.suffix in previewable and not download else "attachment"
         return FileResponse(
             path,
             media_type=media_types.get(path.suffix, "application/octet-stream"),
             filename=path.name,
+            content_disposition_type=disposition,
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "no-store",
+            },
         )
 
     return app
