@@ -213,6 +213,11 @@ details, and experience coverage. DOCX checks still run when PDF rendering is un
 - The browser client formats string and object error payloads and includes the request ID.
 - Application shutdown cancels outstanding background tasks and waits for cancellation.
 - POSIX data directories are restricted to `0700`; the SQLite database is restricted to `0600`.
+- Optional HTTP Basic auth is enforced by `SHARED_PASSWORD`; missing or invalid credentials
+  receive a structured `401` with `WWW-Authenticate` and never reach application routes.
+- POST API requests use an in-process fixed-window rate limit (`RATE_LIMIT_PER_MINUTE`)
+  keyed by `CF-Connecting-IP` when `TRUST_PROXY_HEADERS` is enabled, otherwise by socket peer.
+  Rejections return structured `429` responses with `Retry-After`.
 
 ## Verification
 
@@ -225,7 +230,7 @@ mypy app
 pytest -q
 ```
 
-Result at the time of this report: **69 tests passed**, Ruff clean, mypy clean. The only test
+Result at the time of this report: **72 tests passed**, Ruff clean, mypy clean. The only test
 warning is Starlette's upstream `TestClient`/`httpx` deprecation notice.
 
 Coverage includes scoring separation, evidence classes, dimension matching, education and
@@ -233,8 +238,8 @@ experience matching, claim validation and sanitization, schema retries, SSRF con
 artifact headers, API error envelopes, request IDs, data permissions, task shutdown, DOCX
 verification, award merge/deduplication, resume upload/reset, per-analysis profile URL
 merging, parent-company entity matching, grounded semantic keyword suggestions, LLM
-suggestion rejection/fallback behavior, and an end-to-end deterministic analyze/generate
-flow.
+suggestion rejection/fallback behavior, shared-password gating, per-client rate limiting,
+proxy-aware rate-limit keys, and an end-to-end deterministic analyze/generate flow.
 
 Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio JSON:
 
@@ -265,7 +270,8 @@ Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio
   not guarantee quality or latency.
 - SSRF defenses block the common classes of private-network access; they are not a complete
   network security boundary.
-- The app has no user authentication and is intended for single-user local operation.
+- The app has one optional shared password, not per-user accounts, and is intended for
+  single-operator local operation or short-lived controlled demos.
 - PDF verification depends on Playwright Chromium; absent browser support is reported as an
   ATS failure rather than silently passing.
 - Keyword coverage is requirement-oriented and does not model every ATS vendor's scoring.

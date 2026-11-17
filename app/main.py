@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import base64
+import binascii
 import logging
+import secrets
 import time
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -58,12 +63,37 @@ def _request_id(request: Request) -> str:
     return uuid.uuid4().hex[:12]
 
 
+def _basic_auth_valid(request: Request, password: str) -> bool:
+    header = request.headers.get("authorization", "").strip()
+    scheme, _, token = header.partition(" ")
+    if scheme.casefold() != "basic" or not token.strip():
+        return False
+    try:
+        decoded = base64.b64decode(token.strip(), validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        return False
+    _, separator, supplied = decoded.partition(":")
+    return bool(separator) and secrets.compare_digest(supplied, password)
+
+
+def _client_key(request: Request, trust_proxy_headers: bool) -> str:
+    if trust_proxy_headers:
+        forwarded = request.headers.get("cf-connecting-ip", "").strip()
+        if not forwarded:
+            forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if forwarded and len(forwarded) <= 64:
+            return forwarded
+    return request.client.host if request.client else "unknown"
+
+
 def _error_code(status_code: int) -> str:
     return {
+        401: "unauthorized",
         404: "not_found",
         409: "conflict",
         413: "payload_too_large",
         422: "validation_error",
+        429: "rate_limited",
     }.get(status_code, "request_error")
 
 
@@ -87,6 +117,24 @@ def _error_payload(request: Request, detail: Any, code: str) -> dict[str, Any]:
         "code": code,
         "request_id": getattr(request.state, "request_id", ""),
     }
+
+
+def _error_response(
+    request: Request,
+    status_code: int,
+    detail: str,
+    *,
+    extra_headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    response = JSONResponse(
+        status_code=status_code,
+        content=_error_payload(request, detail, _error_code(status_code)),
+        headers=extra_headers,
+    )
+    response.headers["X-Request-ID"] = request.state.request_id
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def create_app(custom_settings: Settings | None = None) -> FastAPI:
@@ -117,23 +165,73 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
     )
     app.state.service = service
     app.state.settings = active_settings
+    rate_windows: dict[str, deque[float]] = {}
+    rate_lock = asyncio.Lock()
+
+    async def _rate_limited(request: Request) -> bool:
+        limit = active_settings.rate_limit_per_minute
+        if limit <= 0 or request.method != "POST" or not request.url.path.startswith("/api/"):
+            return False
+        key = _client_key(request, active_settings.trust_proxy_headers)
+        now = time.monotonic()
+        async with rate_lock:
+            window = rate_windows.setdefault(key, deque())
+            while window and now - window[0] >= 60:
+                window.popleft()
+            if len(window) >= limit:
+                return True
+            window.append(now)
+        return False
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
         request.state.request_id = _request_id(request)
         started = time.perf_counter()
-        try:
-            response = await call_next(request)
-        except Exception:
-            logger.exception(
-                "http_request_unhandled",
+        password = active_settings.shared_password.strip()
+        if password and not _basic_auth_valid(request, password):
+            logger.warning(
+                "auth_rejected",
+                extra={
+                    "request_id": request.state.request_id,
+                    "path": request.url.path,
+                },
+            )
+            response = _error_response(
+                request,
+                401,
+                "A valid username and shared password are required.",
+                extra_headers={
+                    "WWW-Authenticate": 'Basic realm="Job Apply Assist", charset="UTF-8"'
+                },
+            )
+        elif await _rate_limited(request):
+            logger.warning(
+                "rate_limit_rejected",
                 extra={
                     "request_id": request.state.request_id,
                     "method": request.method,
                     "path": request.url.path,
                 },
             )
-            raise
+            response = _error_response(
+                request,
+                429,
+                "Too many requests. Try again shortly.",
+                extra_headers={"Retry-After": "60"},
+            )
+        else:
+            try:
+                response = await call_next(request)
+            except Exception:
+                logger.exception(
+                    "http_request_unhandled",
+                    extra={
+                        "request_id": request.state.request_id,
+                        "method": request.method,
+                        "path": request.url.path,
+                    },
+                )
+                raise
         response.headers["X-Request-ID"] = request.state.request_id
         if request.url.path.startswith("/api/"):
             response.headers.setdefault("Cache-Control", "no-store")

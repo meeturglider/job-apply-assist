@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     app_host: str = "127.0.0.1"
     app_port: int = 8765
     log_level: str = "INFO"
+    shared_password: str = ""
+    rate_limit_per_minute: int = Field(default=30, ge=0, le=600)
+    trust_proxy_headers: bool = False
 
     llm_provider: str = "ollama"
     ollama_base_url: str = "http://localhost:11434"

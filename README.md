@@ -38,6 +38,17 @@ Open `http://127.0.0.1:8765`.
 Local LLM extraction and tailoring can take 1-4 minutes per run on an 8B model. The UI
 runs these as background jobs and polls for progress, so the page stays responsive.
 
+### Sharing a demo URL
+
+Before exposing the app through a Cloudflare quick tunnel, set `SHARED_PASSWORD` in `.env`
+and restart the server. The browser will prompt for credentials; the username can be
+anything and the password is the shared secret. `RATE_LIMIT_PER_MINUTE` limits POST API
+requests per client, and `TRUST_PROXY_HEADERS=true` lets the app use `CF-Connecting-IP`
+from Cloudflare Tunnel instead of seeing every visitor as localhost.
+
+This is a single shared password, not per-user identity. Anyone with the URL and password
+can upload the shared resume, start jobs, and read history, so use dummy data for demos.
+
 The app expects `MASTER_RESUME.md` in the working directory. Run commands from the
 repository root so relative paths resolve correctly.
 
@@ -92,6 +103,9 @@ See `.env.example`. Key settings:
 | `OLLAMA_RETRY_BACKOFF_SECONDS` | `1` | Base backoff between LLM retries. |
 | `MASTER_RESUME_PATH` | `MASTER_RESUME.md` | Canonical resume source. |
 | `LOG_LEVEL` | `INFO` | Application log level. |
+| `SHARED_PASSWORD` | empty | Enables Basic auth when set; any username works. |
+| `RATE_LIMIT_PER_MINUTE` | `30` | Caps POST API requests per client per minute; `0` disables. |
+| `TRUST_PROXY_HEADERS` | `false` | Uses `CF-Connecting-IP`/`X-Forwarded-For` for rate-limit buckets. |
 | `PORTFOLIO_BASE_URL` | `https://hari.is-a.dev` | Portfolio base URL. |
 | `DATA_DIR` | `data` | Database, cache, and generated artifacts. |
 
