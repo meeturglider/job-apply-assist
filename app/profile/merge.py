@@ -7,12 +7,13 @@ from pathlib import Path
 from app.models import (
     CandidateProfile,
     Certification,
+    EducationEntry,
     Evidence,
     ExperienceEntry,
     Identity,
     ProjectEntry,
 )
-from app.profile.master_resume import parse_master_resume
+from app.profile.master_resume import parse_master_resume, years_of_experience
 from app.profile.portfolio import PortfolioSnapshot
 from app.skills import lexicon
 
@@ -158,6 +159,39 @@ def _merge_awards(left: list[str], right: list[str]) -> list[str]:
             result.append(value)
         elif len(value) > len(match):
             result[result.index(match)] = value
+    return result
+
+
+def _merge_education(
+    left: list[EducationEntry], right: list[EducationEntry]
+) -> list[EducationEntry]:
+    merged = [entry.model_copy(deep=True) for entry in left]
+    seen = {(_key(entry.degree), _key(entry.institution)) for entry in merged}
+    for incoming in right:
+        marker = (_key(incoming.degree), _key(incoming.institution))
+        if any(marker) and marker not in seen:
+            merged.append(incoming.model_copy(deep=True))
+            seen.add(marker)
+    return merged
+
+
+def merge_profiles(base: CandidateProfile, additions: list[CandidateProfile]) -> CandidateProfile:
+    result = base.model_copy(deep=True)
+    for extra in additions:
+        identity = _merge_identity(result.identity, extra.identity, extra.identity.portfolio)
+        if result.identity.portfolio:
+            identity.portfolio = result.identity.portfolio
+        result.identity = identity
+        result.experience = _merge_experience(result.experience, extra.experience)
+        result.projects = _merge_projects(result.projects, extra.projects)
+        result.certifications = _merge_certifications(result.certifications, extra.certifications)
+        result.education = _merge_education(result.education, extra.education)
+        result.awards = _merge_awards(result.awards, extra.awards)
+        result.skills = _merge_evidence(result.skills, extra.skills)
+        result.sources = {**result.sources, **extra.sources}
+        result.warnings = _merge_list(result.warnings, extra.warnings)
+    computed = years_of_experience(result.experience)
+    result.experience_years = max(result.experience_years, computed)
     return result
 
 

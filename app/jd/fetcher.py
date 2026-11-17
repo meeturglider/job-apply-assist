@@ -215,3 +215,86 @@ async def fetch_job_page(url: str, settings: Settings) -> FetchResult:
         content_type=content_type,
         warnings=warnings,
     )
+
+
+async def fetch_public_text(
+    url: str,
+    settings: Settings,
+    *,
+    accept: str = "text/html,application/json;q=0.9,*/*;q=0.8",
+) -> FetchResult:
+    original_url = validate_url(url)
+    current_url = original_url
+    warnings: list[str] = []
+    redirects = 0
+    headers = {
+        "User-Agent": settings.user_agent,
+        "Accept": accept,
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=20.0,
+            follow_redirects=False,
+            headers=headers,
+            trust_env=False,
+        ) as client:
+            while True:
+                await _ensure_public_host(_host_from_url(current_url))
+                async with client.stream("GET", current_url) as response:
+                    if 300 <= response.status_code < 400:
+                        location = response.headers.get("location", "")
+                        if not location:
+                            raise FetchError("The URL returned a redirect without a location.")
+                        if redirects >= MAX_REDIRECTS:
+                            raise FetchError("The URL redirected too many times.")
+                        next_url = validate_url(urljoin(str(response.url), location))
+                        if (
+                            urlparse(current_url).scheme.casefold() == "https"
+                            and urlparse(next_url).scheme.casefold() != "https"
+                        ):
+                            raise FetchError("Refusing to follow a redirect from HTTPS to HTTP.")
+                        current_url = next_url
+                        redirects += 1
+                        continue
+
+                    if response.status_code in {401, 403, 429, 999}:
+                        raise FetchError(
+                            f"The URL blocked automated access (HTTP {response.status_code})."
+                        )
+                    if response.status_code >= 400:
+                        raise FetchError(f"The URL returned HTTP {response.status_code}.")
+
+                    content_type = response.headers.get("content-type", "")
+                    lowered_type = content_type.casefold()
+                    if not any(kind in lowered_type for kind in ("html", "json", "text")):
+                        raise FetchError(f"Unsupported content type: {content_type or 'unknown'}")
+
+                    content_length = response.headers.get("content-length", "")
+                    if content_length.isdigit() and int(content_length) > MAX_RESPONSE_BYTES:
+                        raise FetchError("The response is too large to process safely.")
+
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body.extend(chunk)
+                        if len(body) > MAX_RESPONSE_BYTES:
+                            raise FetchError("The response is too large to process safely.")
+
+                    final_url = str(response.url)
+                    text = bytes(body).decode(response.encoding or "utf-8", errors="replace")
+                    break
+    except httpx.HTTPError as exc:
+        raise FetchError(f"Could not fetch the URL: {exc}") from exc
+
+    if not text.strip():
+        raise FetchError("The URL returned an empty response.")
+    if final_url != original_url:
+        warnings.append(f"URL redirected to {final_url}")
+    return FetchResult(
+        url=original_url,
+        final_url=final_url,
+        html=text,
+        content_type=content_type,
+        warnings=warnings,
+    )

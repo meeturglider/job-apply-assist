@@ -31,6 +31,21 @@ class LLMJobExtraction(BaseModel):
     keywords: dict[str, float] = Field(default_factory=dict)
 
 
+class LLMProfileSuggestion(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    keyword: str = ""
+    evidence_index: int = Field(ge=0)
+    suggestion: str = ""
+    reason: str = ""
+
+
+class LLMProfileSuggestions(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    suggestions: list[LLMProfileSuggestion] = Field(default_factory=list)
+
+
 class LLMSkillGroup(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

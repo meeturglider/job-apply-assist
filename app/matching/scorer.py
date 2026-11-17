@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 
 from app.matching.matcher import (
+    entity_evidence_matches,
+    entity_for_keyword,
     keyword_presence,
     match_requirements,
 )
@@ -11,6 +13,7 @@ from app.models import (
     CandidateProfile,
     EvidenceCoverage,
     JobDescription,
+    KeywordSuggestion,
     Requirement,
     ScoreBreakdown,
     ScoreComponent,
@@ -154,7 +157,35 @@ def _keyword_score(
     simple = (
         sum(1 for value in present.values() if value) / len(present) * 100 if present else 100.0
     )
-    return ratio, present, round(simple, 1)
+    return ratio, present, round(max(0.0, min(simple, 100.0)), 1)
+
+
+def _keyword_suggestions(job: JobDescription, profile: CandidateProfile) -> list[KeywordSuggestion]:
+    suggestions: list[KeywordSuggestion] = []
+    seen: set[tuple[str, str]] = set()
+    for keyword in job.keywords:
+        matches = entity_evidence_matches(keyword, profile)
+        if not matches:
+            continue
+        canonical = entity_for_keyword(keyword) or keyword
+        source = matches[0].source
+        marker = (canonical.casefold(), source.casefold())
+        if marker in seen:
+            continue
+        seen.add(marker)
+        suggestions.append(
+            KeywordSuggestion(
+                keyword=canonical,
+                source=source,
+                suggestion=(
+                    f'Make the "{canonical}" connection explicit in your profile, for example '
+                    f'"{source} ({canonical})" in the employer line or "{canonical}" in the '
+                    "role summary."
+                ),
+                reason=f'"{source}" is a known {canonical} entity in the profile alias map.',
+            )
+        )
+    return suggestions
 
 
 def _component(
@@ -477,6 +508,7 @@ def analyze_match(job: JobDescription, profile: CandidateProfile) -> AnalysisRes
         missing_nice_to_have=missing_nice,
         keyword_coverage=keyword_coverage,
         keyword_coverage_pct=keyword_pct,
+        keyword_suggestions=_keyword_suggestions(job, profile),
         recommendations=_recommendations(matches, job, profile, suitability_total),
         warnings=warnings,
     )

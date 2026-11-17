@@ -377,6 +377,10 @@ def _close_years(value: str, computed: float) -> bool:
     return abs(int(match.group(0)) - round(computed)) <= 1
 
 
+def years_of_experience(experience: list[ExperienceEntry]) -> float:
+    return _years_of_experience(experience)
+
+
 def _years_of_experience(experience: list[ExperienceEntry]) -> float:
     starts: list[date] = []
     ends: list[date] = []

@@ -6,7 +6,7 @@ from app.llm import OllamaClient
 from app.matching.dimensions import classify_dimension
 from app.matching.matcher import keyword_presence, match_requirements
 from app.matching.scorer import analyze_match
-from app.models import CandidateProfile, Evidence, JobDescription, Requirement
+from app.models import CandidateProfile, Evidence, ExperienceEntry, JobDescription, Requirement
 
 
 def _job(*skills: str) -> JobDescription:
@@ -43,6 +43,51 @@ def test_scoring_rewards_matches_and_penalizes_gaps(profile: CandidateProfile) -
 def test_keyword_presence_uses_alias_evidence(profile: CandidateProfile) -> None:
     assert keyword_presence("GCP", profile) is True
     assert keyword_presence("COBOL", profile) is False
+
+
+def test_keyword_presence_matches_parent_company_entity(profile: CandidateProfile) -> None:
+    candidate = profile.model_copy(
+        update={
+            "experience": [
+                ExperienceEntry(company="Google Operations Center", role="Operations Analyst"),
+                *profile.experience,
+            ]
+        }
+    )
+    unrelated = profile.model_copy(
+        update={
+            "experience": [
+                ExperienceEntry(company="Microsoft Operations Center", role="Operations Analyst"),
+                *profile.experience,
+            ]
+        }
+    )
+    assert keyword_presence("Alphabet", candidate) is True
+    assert keyword_presence("alphabet", candidate) is True
+    assert keyword_presence("Alphabet", unrelated) is False
+
+
+def test_entity_keyword_adds_grounded_profile_suggestion(profile: CandidateProfile) -> None:
+    candidate = profile.model_copy(
+        update={
+            "experience": [
+                ExperienceEntry(company="Google Operations Center", role="Operations Analyst"),
+                *profile.experience,
+            ]
+        }
+    )
+    job = _job()
+    job.keywords = {"alphabet": 5.0, "COBOL": 1.0}
+    result = analyze_match(job, candidate)
+
+    assert result.keyword_coverage["alphabet"] is True
+    assert result.keyword_coverage["COBOL"] is False
+    assert result.keyword_coverage_pct == 50.0
+    assert len(result.keyword_suggestions) == 1
+    suggestion = result.keyword_suggestions[0]
+    assert suggestion.keyword == "Alphabet"
+    assert suggestion.source == "Google Operations Center"
+    assert "Alphabet" in suggestion.suggestion
 
 
 def test_related_engineering_degree_satisfies_cs_requirement(profile: CandidateProfile) -> None:

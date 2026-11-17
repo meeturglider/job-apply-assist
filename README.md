@@ -41,6 +41,12 @@ runs these as background jobs and polls for progress, so the page stays responsi
 The app expects `MASTER_RESUME.md` in the working directory. Run commands from the
 repository root so relative paths resolve correctly.
 
+The UI can temporarily replace that source with an uploaded Markdown/text resume and can
+add up to five public portfolio or LinkedIn URLs to the next analysis. Uploaded resumes are
+stored as `data/profile/resume.md`; **Use default** restores `MASTER_RESUME.md`. Additional
+URLs are fetched with the same SSRF controls as job URLs, are attached to that application
+record for reproducibility, and are never treated as persistent source defaults.
+
 ## CLI
 
 ```bash
@@ -108,7 +114,9 @@ Included:
 - JD URL fetch with manual-paste fallback
 - Local LLM + deterministic analysis and tailoring
 - Profile merge across resume, portfolio JSON, and JSON-LD
+- Per-session resume upload and per-analysis profile URLs
 - Match scoring with evidence
+- Evidence-grounded semantic profile-edit suggestions
 - PDF, DOCX, HTML, and Markdown exports
 - Truthfulness validation and sanitization
 - ATS checks and application history

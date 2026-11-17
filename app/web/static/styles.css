@@ -796,6 +796,42 @@ details.evidence[open] summary::before {
   color: #86efac;
 }
 
+.keyword-suggestions {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.keyword-suggestions .suggestion {
+  padding: 9px 10px;
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  border-radius: 9px;
+  background: rgba(96, 165, 250, 0.06);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.keyword-suggestions .suggestion strong {
+  color: var(--accent);
+}
+
+.suggestion-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 5px;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 6px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 9px;
+}
+
+.keyword-suggestions .micro {
+  display: block;
+  margin-top: 4px;
+}
+
 .warning-panel ul {
   margin: 0;
   padding-left: 16px;
@@ -1001,4 +1037,25 @@ details.evidence[open] summary::before {
   .field-row {
     grid-template-columns: 1fr;
   }
+}
+
+.source-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.source-actions .primary-button {
+  width: auto;
+  flex: 1;
+}
+
+.source-actions .ghost-button {
+  white-space: nowrap;
+}
+
+.field-note {
+  display: block;
+  margin-top: -2px;
+  line-height: 1.5;
 }

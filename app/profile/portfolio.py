@@ -176,6 +176,52 @@ def _add_skill_evidence(skills: dict[str, list[Evidence]], source: str, texts: l
             skills.setdefault(canonical, []).append(Evidence(source=source, text=text))
 
 
+def person_profile_from_html(html: str, url: str) -> PortfolioSnapshot:
+    person = _person_document(_find_json_ld(html))
+    payload: dict[str, Any] = {
+        "base_url": url,
+        "home_url": url,
+        "source_label": "additional_url",
+    }
+    if person:
+        payload["person"] = person
+    else:
+        payload["warnings"] = ["No schema.org Person record was found in the page."]
+    return PortfolioSnapshot(payload)
+
+
+def snapshot_from_json(payload: Any, url: str) -> PortfolioSnapshot:
+    base: dict[str, Any] = {
+        "base_url": url,
+        "home_url": url,
+        "source_label": "additional_url",
+    }
+    if isinstance(payload, dict) and any(
+        key in payload for key in ("person", "experience", "projects", "warnings")
+    ):
+        return PortfolioSnapshot({**base, **payload})
+    if isinstance(payload, list):
+        return PortfolioSnapshot({**base, "experience": payload})
+    if isinstance(payload, dict) and any(key in payload for key in ("featured", "lab")):
+        return PortfolioSnapshot({**base, "projects": payload})
+
+    documents: list[dict[str, Any]]
+    if isinstance(payload, list):
+        documents = [item for item in payload if isinstance(item, dict)]
+    elif isinstance(payload, dict) and isinstance(payload.get("@graph"), list):
+        documents = [item for item in payload["@graph"] if isinstance(item, dict)]
+    elif isinstance(payload, dict):
+        documents = [payload]
+    else:
+        documents = []
+    person = _person_document(documents)
+    if person:
+        return PortfolioSnapshot({**base, "person": person})
+    return PortfolioSnapshot(
+        {**base, "warnings": ["No supported profile data was found in the JSON response."]}
+    )
+
+
 class PortfolioSnapshot:
     def __init__(self, payload: dict[str, Any]) -> None:
         self.payload = payload

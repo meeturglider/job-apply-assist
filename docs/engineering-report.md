@@ -106,6 +106,21 @@ Education and experience requirements are evaluated as their own categories rath
 being treated as missing skills. Computed professional experience is rounded for threshold
 matching, while the precise value remains in the profile.
 
+Employer names are searchable evidence and a small curated entity map connects subsidiary
+names to parent companies, for example `Google Operations Center` to `Alphabet`. A JD
+keyword for the parent is therefore counted as present, and the analysis emits a grounded
+profile-edit suggestion such as `Google Operations Center (Alphabet)`. Keyword coverage in
+the UI now shows the `present / total` denominator and derives a clamped percentage from the
+coverage map, so a stored or visual formatting issue cannot render an impossible value.
+
+When the LLM is enabled, `app/matching/suggestions.py` adds an advisory semantic pass after
+matching. It submits only JD keywords that are not literally present and a bounded, indexed
+list of existing profile evidence to a narrow schema. Returned proposals are accepted only
+when their keyword is in scope, their evidence index exists, and their wording is grounded
+in that indexed evidence. Accepted suggestions are labelled `Possible profile edit` and
+never alter scores, coverage, matches, or generated resume facts. In deterministic-only
+mode the stage is skipped and the curated deterministic suggestions remain.
+
 ## Claim Validation and Sanitization
 
 `app/tailoring/claims.py` extracts checkable claims from generated text:
@@ -161,6 +176,21 @@ source, so analysis and generation still run as background tasks.
 This reduces SSRF risk but is not a substitute for running the app on a trusted local
 machine or placing it behind an authenticated reverse proxy if exposed to a network.
 
+## Interactive Source Controls
+
+A later incremental change adds per-session resume upload and per-analysis profile URLs.
+`POST /api/profile/resume` stores Markdown/text under `data/profile/resume.md`, and
+`POST /api/profile/resume/reset` removes it so the canonical `MASTER_RESUME.md` is used
+again. `AnalyzeRequest.profile_urls` accepts up to five public URLs; the application loads
+JSON, JSON-LD, or page metadata, merges only additive evidence into the profile, tags that
+evidence with its source URL, and persists the merged `profile.json` with the application
+artifacts. Defaults are unchanged when no extra URLs are supplied, and failures are reported
+as warnings rather than aborting analysis.
+
+Additional URL fetching reuses `fetch_public_text`, so the SSRF controls above apply to
+profile sources as well as job URLs. Uploaded resumes are also validated against source
+evidence by the same claim validator used for the canonical resume.
+
 ## Document Generation and Verification
 
 HTML and Markdown artifacts are previewable inline; downloads force attachment semantics.
@@ -195,13 +225,15 @@ mypy app
 pytest -q
 ```
 
-Result at the time of this report: **59 tests passed**, Ruff clean, mypy clean. The only test
+Result at the time of this report: **69 tests passed**, Ruff clean, mypy clean. The only test
 warning is Starlette's upstream `TestClient`/`httpx` deprecation notice.
 
 Coverage includes scoring separation, evidence classes, dimension matching, education and
 experience matching, claim validation and sanitization, schema retries, SSRF controls,
 artifact headers, API error envelopes, request IDs, data permissions, task shutdown, DOCX
-verification, award merge/deduplication, and an end-to-end deterministic analyze/generate
+verification, award merge/deduplication, resume upload/reset, per-analysis profile URL
+merging, parent-company entity matching, grounded semantic keyword suggestions, LLM
+suggestion rejection/fallback behavior, and an end-to-end deterministic analyze/generate
 flow.
 
 Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio JSON:

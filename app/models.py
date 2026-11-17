@@ -98,6 +98,8 @@ class CandidateProfile(BaseModel):
         for items in self.skills.values():
             evidence.extend(items)
         for exp in self.experience:
+            if exp.company:
+                evidence.append(Evidence(source=exp.company, text=exp.company))
             if exp.summary:
                 evidence.append(Evidence(source=exp.company, text=exp.summary))
             evidence.extend(Evidence(source=exp.company, text=bullet) for bullet in exp.bullets)
@@ -209,6 +211,17 @@ class ScoreReport(BaseModel):
     methodology: str = ""
 
 
+class KeywordSuggestion(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    keyword: str
+    source: str
+    suggestion: str
+    reason: str = ""
+    evidence: str = ""
+    origin: Literal["deterministic", "semantic"] = "deterministic"
+
+
 class AnalysisResult(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -223,6 +236,7 @@ class AnalysisResult(BaseModel):
     missing_nice_to_have: list[str] = Field(default_factory=list)
     keyword_coverage: dict[str, bool] = Field(default_factory=dict)
     keyword_coverage_pct: float = 0
+    keyword_suggestions: list[KeywordSuggestion] = Field(default_factory=list)
     recommendations: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
@@ -354,6 +368,7 @@ class ApplicationRecord(BaseModel):
     company: str = ""
     role: str = ""
     source_url: str = ""
+    profile_urls: list[str] = Field(default_factory=list)
     status: str = "analyzed"
     stage: str = "done"
     message: str = ""

@@ -26,6 +26,26 @@
     <aside class="sidebar">
       <section class="panel">
         <div class="panel-heading">
+          <h2>Candidate sources</h2>
+          <span class="micro">Step 0</span>
+        </div>
+        <label class="field">
+          <span>Resume file (Markdown or text)</span>
+          <input id="resume-file" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain">
+        </label>
+        <div class="source-actions">
+          <button class="primary-button" id="upload-resume" type="button">Upload resume</button>
+          <button class="ghost-button" id="reset-resume" type="button">Use default</button>
+        </div>
+        <label class="field">
+          <span>Additional profile URLs</span>
+          <textarea id="profile-urls" rows="3" placeholder="LinkedIn or portfolio URLs, one per line"></textarea>
+        </label>
+        <p class="micro field-note">Added to the next analysis only. The master resume stays unchanged.</p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
           <h2>Target job</h2>
           <span class="micro">Step 1</span>
         </div>
@@ -157,6 +177,7 @@
               <span class="micro" id="keyword-pct">0%</span>
             </div>
             <div class="keyword-wrap" id="keyword-wrap"></div>
+            <div class="keyword-suggestions" id="keyword-suggestions"></div>
           </div>
         </div>
 

@@ -113,9 +113,11 @@ async function refreshHealth() {
     llm.className = `pill ${health.llm_available ? "success" : "warning"}`;
     const profile = health.profile;
     const ps = $("profile-status");
-    ps.textContent = profile.master_resume_exists
-      ? "Profile source ready"
-      : "MASTER_RESUME.md missing";
+    ps.textContent = profile.uploaded_resume
+      ? "Uploaded resume active"
+      : profile.master_resume_exists
+        ? "Profile source ready"
+        : "Resume source missing";
     ps.className = `pill ${profile.master_resume_exists ? "" : "warning"}`;
   } catch (error) {
     $("llm-status").textContent = "Health check failed";
@@ -140,6 +142,70 @@ async function refreshProfile() {
     button.disabled = false;
     button.textContent = "Refresh profile";
   }
+}
+
+async function uploadResume() {
+  const input = $("resume-file");
+  const file = input.files && input.files[0];
+  if (!file) {
+    showNotice("Choose a Markdown or text resume first.", "warning");
+    return;
+  }
+  if (!/\.(md|markdown|txt)$/i.test(file.name) && !file.type.startsWith("text/")) {
+    showNotice("Only Markdown and text resumes are supported.", "error");
+    return;
+  }
+  if (file.size > 1_000_000) {
+    showNotice("The resume file must be 1 MB or smaller.", "error");
+    return;
+  }
+  const button = $("upload-resume");
+  button.disabled = true;
+  button.textContent = "Uploading...";
+  try {
+    const text = await file.text();
+    const profile = await api("/api/profile/resume", {
+      method: "POST",
+      body: JSON.stringify({ text, filename: file.name }),
+    });
+    showNotice(
+      `Resume uploaded: ${profile.experience_count} roles, ${profile.skill_count} skills.`,
+      "success",
+    );
+    await refreshHealth();
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Upload resume";
+  }
+}
+
+async function resetResume() {
+  const button = $("reset-resume");
+  button.disabled = true;
+  button.textContent = "Resetting...";
+  try {
+    const profile = await api("/api/profile/resume/reset", { method: "POST", body: "{}" });
+    $("resume-file").value = "";
+    showNotice(
+      `Default resume restored: ${profile.experience_count} roles, ${profile.skill_count} skills.`,
+      "success",
+    );
+    await refreshHealth();
+  } catch (error) {
+    showNotice(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Use default";
+  }
+}
+
+function profileUrls() {
+  return $("profile-urls")
+    .value.split("\n")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 async function refreshHistory() {
@@ -291,13 +357,13 @@ function renderBreakdown(analysis) {
   }
   definitions.forEach(([label, metric]) => {
     const maximum = metric.maximum ?? metric.max ?? 100;
-    const value = metric.value ?? 0;
+    const value = Math.max(0, Math.min(Number(metric.value) || 0, maximum));
     const card = el("div", "breakdown-card");
     card.appendChild(el("span", "", label));
-    card.appendChild(el("strong", "", Number(value).toFixed(1)));
+    card.appendChild(el("strong", "", value.toFixed(1)));
     const track = el("div", "breakdown-track");
     const fill = el("div", "breakdown-fill");
-    fill.style.width = `${Math.min(100, maximum ? (value / maximum) * 100 : 0)}%`;
+    fill.style.width = `${maximum ? (value / maximum) * 100 : 0}%`;
     track.appendChild(fill);
     card.appendChild(track);
     if (metric.explanation) {
@@ -388,10 +454,12 @@ function renderRecommendations(analysis, job) {
 }
 
 function renderKeywords(analysis) {
-  $("keyword-pct").textContent = `${analysis.keyword_coverage_pct}% covered`;
   const wrap = $("keyword-wrap");
   clear(wrap);
   const entries = Object.entries(analysis.keyword_coverage || {});
+  const covered = entries.filter(([, present]) => present).length;
+  const pct = entries.length ? Math.round((covered / entries.length) * 1000) / 10 : 100;
+  $("keyword-pct").textContent = `${covered} of ${entries.length} keywords (${pct.toFixed(1)}%)`;
   entries
     .sort((a, b) => Number(a[1]) - Number(b[1]))
     .forEach(([keyword, present]) => {
@@ -400,6 +468,18 @@ function renderKeywords(analysis) {
       wrap.appendChild(chip);
     });
   if (!entries.length) wrap.appendChild(el("div", "muted", "No keywords detected."));
+
+  const suggestions = $("keyword-suggestions");
+  clear(suggestions);
+  (analysis.keyword_suggestions || []).forEach((item) => {
+    const box = el("div", "suggestion");
+    box.appendChild(el("strong", "", item.keyword));
+    if (item.origin === "semantic") box.appendChild(el("span", "suggestion-badge", "Possible profile edit"));
+    box.appendChild(el("div", "", item.suggestion));
+    if (item.evidence) box.appendChild(el("span", "micro", `Evidence: ${item.evidence}`));
+    else if (item.source) box.appendChild(el("span", "micro", `Based on ${item.source}`));
+    suggestions.appendChild(box);
+  });
 }
 
 function renderWarnings(warnings) {
@@ -550,6 +630,7 @@ async function submitAnalysis(event) {
         text,
         company: $("job-company").value.trim(),
         role: $("job-role").value.trim(),
+        profile_urls: profileUrls(),
       }),
     });
     state.currentId = data.application.id;
@@ -615,6 +696,8 @@ async function poll() {
 $("analyze-form").addEventListener("submit", submitAnalysis);
 $("generate-button").addEventListener("click", generateResume);
 $("refresh-profile").addEventListener("click", refreshProfile);
+$("upload-resume").addEventListener("click", uploadResume);
+$("reset-resume").addEventListener("click", resetResume);
 
 refreshHealth();
 refreshHistory();

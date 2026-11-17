@@ -14,11 +14,13 @@ from app.jd.extractor import JobExtraction, extract_job, manual_job_text
 from app.jd.fetcher import FetchError, ManualPasteRequired, fetch_job_page
 from app.llm import OllamaClient
 from app.matching.scorer import analyze_match
+from app.matching.suggestions import enrich_profile_suggestions
 from app.models import (
     ApplicationRecord,
     ArtifactInfo,
     AtsCheck,
     AtsReport,
+    CandidateProfile,
     JobDescription,
     ValidationReport,
 )
@@ -48,7 +50,13 @@ class ApplicationService:
         self.llm = OllamaClient(settings)
         self._tasks: set[asyncio.Task[None]] = set()
 
-    def _new_record(self, company: str, role: str, source_url: str) -> ApplicationRecord:
+    def _new_record(
+        self,
+        company: str,
+        role: str,
+        source_url: str,
+        profile_urls: list[str] | None = None,
+    ) -> ApplicationRecord:
         now = datetime.now(UTC)
         application_id = (
             f"{now.strftime('%Y%m%d-%H%M%S')}-{_slug(company or role)}-{uuid.uuid4().hex[:4]}"
@@ -60,6 +68,7 @@ class ApplicationService:
             company=company,
             role=role,
             source_url=source_url,
+            profile_urls=profile_urls or [],
             status="queued",
             stage="queued",
             message="Queued for analysis.",
@@ -116,10 +125,18 @@ class ApplicationService:
         text: str = "",
         company: str = "",
         role: str = "",
+        profile_urls: list[str] | None = None,
     ) -> ApplicationRecord:
-        record = self._new_record(company, role, url)
+        record = self._new_record(company, role, url, profile_urls)
         task = asyncio.create_task(
-            self._analyze(record.id, url=url, text=text, company=company, role=role)
+            self._analyze(
+                record.id,
+                url=url,
+                text=text,
+                company=company,
+                role=role,
+                profile_urls=record.profile_urls,
+            )
         )
         self._track(task)
         return record
@@ -132,6 +149,7 @@ class ApplicationService:
         text: str,
         company: str,
         role: str,
+        profile_urls: list[str],
     ) -> None:
         record = self.store.get(application_id)
         if record is None:
@@ -166,7 +184,10 @@ class ApplicationService:
                 stage="matching",
                 message="Loading your resume and portfolio...",
             )
-            profile = await self.profiles.load()
+            profile = await self.profiles.load(extra_urls=profile_urls)
+            (directory / "profile.json").write_text(
+                profile.model_dump_json(indent=2), encoding="utf-8"
+            )
 
             self._update(
                 record,
@@ -182,6 +203,7 @@ class ApplicationService:
                 source_url=url or extraction.source_url,
             )
             analysis = analyze_match(job, profile)
+            analysis = await enrich_profile_suggestions(job, profile, analysis, self.llm)
 
             (directory / "job.json").write_text(job.model_dump_json(indent=2), encoding="utf-8")
             (directory / "analysis.json").write_text(
@@ -290,7 +312,13 @@ class ApplicationService:
             analysis = AnalysisResult.model_validate_json(
                 (directory / "analysis.json").read_text(encoding="utf-8")
             )
-            profile = await self.profiles.load()
+            profile_path = directory / "profile.json"
+            if profile_path.exists():
+                profile = CandidateProfile.model_validate_json(
+                    profile_path.read_text(encoding="utf-8")
+                )
+            else:
+                profile = await self.profiles.load(extra_urls=record.profile_urls)
             resume, validation, method = await build_resume(profile, job, analysis, self.llm)
             self._update(
                 record,
@@ -446,7 +474,15 @@ class ApplicationService:
             raise FileNotFoundError("Application not found.")
         directory = self._directory(application_id)
         payload: dict[str, object] = {"record": record.model_dump(mode="json")}
-        for name in ("job", "analysis", "ats_report", "validation", "resume", "metadata"):
+        for name in (
+            "job",
+            "analysis",
+            "profile",
+            "ats_report",
+            "validation",
+            "resume",
+            "metadata",
+        ):
             path = directory / f"{name}.json"
             if path.exists():
                 payload[name] = json.loads(path.read_text(encoding="utf-8"))

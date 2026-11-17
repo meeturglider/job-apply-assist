@@ -54,6 +54,38 @@ NEGATION_RE = re.compile(
 )
 NOT_ONLY_RE = re.compile(r"\bnot only\b", re.IGNORECASE)
 
+ENTITY_ALIASES: dict[str, tuple[str, ...]] = {
+    "Alphabet": (
+        "alphabet",
+        "alphabet inc",
+        "google operations center",
+        "google llc",
+        "google inc",
+        "google incorporated",
+    ),
+}
+ENTITY_LOOKUP = {
+    lexicon.normalize(alias): canonical
+    for canonical, aliases in ENTITY_ALIASES.items()
+    for alias in aliases
+}
+
+
+def entity_for_keyword(keyword: str) -> str | None:
+    return ENTITY_LOOKUP.get(lexicon.normalize(keyword))
+
+
+def entity_evidence_matches(keyword: str, profile: CandidateProfile) -> list[Evidence]:
+    canonical = entity_for_keyword(keyword)
+    if canonical is None:
+        return []
+    aliases = list(ENTITY_ALIASES[canonical])
+    return [
+        Evidence(source=entry.company, text=entry.company)
+        for entry in profile.experience
+        if entry.company and _search_aliases(entry.company, aliases)
+    ]
+
 
 def _search_aliases(text: str, aliases: list[str]) -> bool:
     for alias in sorted(set(aliases), key=len, reverse=True):
@@ -509,12 +541,20 @@ def match_requirements(job: JobDescription, profile: CandidateProfile) -> list[S
     return matches
 
 
-def keyword_presence(keyword: str, profile: CandidateProfile) -> bool:
+def keyword_presence(
+    keyword: str, profile: CandidateProfile, *, include_entities: bool = True
+) -> bool:
+    if include_entities and entity_evidence_matches(keyword, profile):
+        return True
     canonical = lexicon.canonicalize(keyword)
     if canonical in profile.skills:
         return True
     aliases = lexicon.aliases_for(canonical) if canonical else [keyword]
     return any(_search_aliases(item.text, aliases) for item in profile.all_evidence())
+
+
+def literal_keyword_presence(keyword: str, profile: CandidateProfile) -> bool:
+    return keyword_presence(keyword, profile, include_entities=False)
 
 
 def grouped_matches(matches: list[SkillMatch]) -> dict[str, list[str]]:

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import Settings, settings
+from app.jd.fetcher import FetchError, validate_url
 from app.service import ApplicationService
 
 WEB_DIR = Path(__file__).parent / "web"
@@ -27,6 +28,12 @@ class AnalyzeRequest(BaseModel):
     text: str = Field(default="", max_length=100_000)
     company: str = Field(default="", max_length=200)
     role: str = Field(default="", max_length=200)
+    profile_urls: list[str] = Field(default_factory=list, max_length=5)
+
+
+class ResumeUploadRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=1_000_000)
+    filename: str = Field(default="uploaded_resume.md", max_length=200)
 
 
 def _configure_logging(level: str) -> None:
@@ -58,6 +65,20 @@ def _error_code(status_code: int) -> str:
         413: "payload_too_large",
         422: "validation_error",
     }.get(status_code, "request_error")
+
+
+def _clean_profile_urls(values: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for value in values:
+        if not value.strip():
+            continue
+        try:
+            url = validate_url(value)
+        except FetchError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid profile URL: {exc}") from exc
+        if url not in cleaned:
+            cleaned.append(url)
+    return cleaned
 
 
 def _error_payload(request: Request, detail: Any, code: str) -> dict[str, Any]:
@@ -200,16 +221,24 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
     @app.post("/api/profile/refresh")
     async def profile_refresh() -> dict[str, object]:
         profile = await service.profiles.load(refresh=True)
-        return {
-            "identity": profile.identity.model_dump(),
-            "experience_years": profile.experience_years,
-            "experience_count": len(profile.experience),
-            "project_count": len(profile.projects),
-            "skill_count": len(profile.skills),
-            "certification_count": len(profile.certifications),
-            "warnings": profile.warnings,
-            "sources": profile.sources,
-        }
+        summary = service.profiles.summary(profile)
+        return {**summary, "profile": summary}
+
+    @app.post("/api/profile/resume")
+    async def resume_upload(request: ResumeUploadRequest) -> dict[str, object]:
+        try:
+            profile = service.profiles.upload_resume(request.text, request.filename)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        summary = service.profiles.summary(profile)
+        return {**summary, "profile": summary, "status": service.profiles.status()}
+
+    @app.post("/api/profile/resume/reset")
+    async def resume_reset() -> dict[str, object]:
+        service.profiles.reset_resume()
+        profile = await service.profiles.load()
+        summary = service.profiles.summary(profile)
+        return {**summary, "profile": summary, "status": service.profiles.status()}
 
     @app.post("/api/analyze")
     async def analyze(request: AnalyzeRequest) -> dict[str, object]:
@@ -222,6 +251,7 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             text=request.text.strip(),
             company=request.company.strip(),
             role=request.role.strip(),
+            profile_urls=_clean_profile_urls(request.profile_urls),
         )
         return {"application": record.model_dump(mode="json")}
 
