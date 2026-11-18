@@ -374,7 +374,7 @@ class ApplicationService:
             record,
             status="analyzed",
             stage="notes",
-            message="Evidence notes saved. Reanalyzing with your notes.",
+            message="Evidence notes saved. Reanalyze when you're ready.",
             notes=notes,
             notes_revision=revision,
             notes_validated_revision="",
@@ -396,7 +396,7 @@ class ApplicationService:
             record,
             status="analyzing",
             stage="notes",
-            message="Revalidating with your evidence notes...",
+            message="Reanalyzing with your evidence notes...",
         )
         task = asyncio.create_task(self._revalidate(application_id))
         self._track(task)
@@ -455,7 +455,7 @@ class ApplicationService:
                 stage="done",
                 message=(
                     f"{analysis.score_label}: {analysis.score.total}% match. "
-                    f"Revalidated {len(decisions)} note(s): {accepted} accepted, {rejected} rejected."
+                    f"Reanalyzed {len(decisions)} note(s): {accepted} accepted, {rejected} rejected."
                 ),
                 score=analysis.score.total,
                 profile_hash=ProfileService.hash(noted_profile),
@@ -472,7 +472,7 @@ class ApplicationService:
                 record,
                 status="error",
                 stage="error",
-                message="Revalidation failed unexpectedly. Check the app logs for details.",
+                message="Reanalysis failed unexpectedly. Check the app logs for details.",
                 error="internal_error",
             )
 

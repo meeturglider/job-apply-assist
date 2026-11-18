@@ -277,8 +277,9 @@ proxy-aware rate-limit keys, an end-to-end deterministic analyze/generate flow, 
 registration/login, session isolation, CSRF enforcement, session-only storage, session-scoped
 profile status, resume-before-analysis gating, contact extraction, outreach drafting, tracker
 updates, prefill payloads, portal UI/extension controls, Google-style prompt constraints,
-unquantified-impact warnings, validated manual resume edits that regenerate every artifact, and
-automatic same-company role merging across HTML, Markdown, and DOCX rendering.
+unquantified-impact warnings, manual batched evidence-note reanalysis, validated manual resume
+edits that regenerate every artifact, and automatic same-company role merging across HTML,
+Markdown, and DOCX rendering.
 
 Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio JSON:
 

@@ -157,10 +157,11 @@ keyword, while matches show the origin mix behind their evidence.
 
 Application-specific evidence notes can be added for a target skill. A note must mention its
 target to be accepted; accepted notes are tagged as `User note` and any dates, metrics, titles,
-or outcome claims are flagged for review. Saving notes triggers revalidation automatically, so
-the refreshed analysis is ready before generating a tailored resume. Revalidation keeps the
-original baseline analysis for comparison and applies the same claim validation as the main
-pipeline.
+or outcome claims are flagged for review. Saving notes only updates the application; the
+`Reanalyze notes` action runs one reanalysis after all notes are saved, so repeated note edits
+do not trigger repeated AI work. Generation stays blocked until that reanalysis completes.
+Reanalysis keeps the original baseline analysis for comparison and applies the same claim
+validation as the main pipeline.
 
 ## Configuration
 

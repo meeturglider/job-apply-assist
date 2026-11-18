@@ -31,6 +31,8 @@ def test_ui_exposes_portal_and_extension_controls() -> None:
     assert "validateAuth" in script
     assert '$("status-strip").hidden = true' in script
     assert "updateProfileStatus" in script
+    assert '"Awaiting resume upload"' in script
+    assert '"Resume source missing"' not in script
     assert '$("resume-file").addEventListener("change"' in script
     assert "Upload a resume before analyzing a job." in script
     assert 'button.textContent = "Analyzing..."' in script
@@ -77,11 +79,16 @@ def test_progress_steps_mark_done_and_active_states() -> None:
     assert "opacity: 0.5;" in styles
 
 
-def test_saving_notes_auto_revalidates() -> None:
+def test_saving_notes_requires_manual_reanalysis() -> None:
     root = Path(__file__).parents[1]
+    html = (root / "app/web/index.html").read_text(encoding="utf-8")
     script = (root / "app/web/static/app.js").read_text(encoding="utf-8")
+    save_function = script.split("async function saveApplicationNotes", 1)[1].split("\n}\n", 1)[0]
     assert "revalidating: false," in script
-    assert "await revalidateNotes();" in script
-    assert "Reanalyzing with your note..." in script
+    assert "revalidateNotes" not in save_function
+    assert "Evidence notes saved. Reanalyze when you're ready." in save_function
+    assert ">Reanalyze notes</button>" in html
+    assert '"Reanalyze notes to generate"' in script
+    assert 'button.textContent = "Reanalyze notes";' in script
     assert "if (!state.currentId || state.revalidating) return;" in script
     assert "stopPolling();\n    poll();" in script

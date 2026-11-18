@@ -155,7 +155,7 @@ function updateProfileStatus(profile) {
     ? "Uploaded resume active"
     : profile.master_resume_exists
       ? "Profile source ready"
-      : "Resume source missing";
+      : "Awaiting resume upload";
   ps.className = `pill ${state.profileReady ? "" : "warning"}`;
 }
 
@@ -342,13 +342,7 @@ async function saveApplicationNotes(entries) {
   });
   state.detail.record = data.application;
   renderAnalysis(state.detail);
-  showNotice(
-    notesPending(data.application)
-      ? "Evidence note saved. Reanalyzing with your note..."
-      : "Evidence notes updated. Reanalyzing with your notes...",
-    "success",
-  );
-  await revalidateNotes();
+  showNotice("Evidence notes saved. Reanalyze when you're ready.", "success");
 }
 
 function noteEditor(target) {
@@ -426,14 +420,14 @@ async function revalidateNotes() {
       method: "POST",
       body: "{}",
     });
-    showProgress("revalidation", "Revalidating evidence notes...");
+    showProgress("revalidation", "Reanalyzing evidence notes...");
     stopPolling();
     poll();
   } catch (error) {
     state.revalidating = false;
     showNotice(error.message, "error");
     button.disabled = false;
-    button.textContent = "Revalidate notes";
+    button.textContent = "Reanalyze notes";
   }
 }
 
@@ -564,14 +558,14 @@ function renderAnalysis(detail) {
   const button = $("generate-button");
   button.disabled = pending;
   button.textContent = pending
-    ? "Revalidate notes to generate"
+    ? "Reanalyze notes to generate"
     : record.status === "generated"
       ? "Regenerate tailored resume"
       : "Generate tailored resume";
   const revalidate = $("revalidate-button");
   revalidate.hidden = !pending;
   revalidate.disabled = false;
-  revalidate.textContent = "Revalidate notes";
+  revalidate.textContent = "Reanalyze notes";
 }
 
 function renderApplyWorkflow(detail) {
