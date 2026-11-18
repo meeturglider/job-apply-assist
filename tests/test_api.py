@@ -15,6 +15,7 @@ def _settings(tmp_path: Path) -> Settings:
         master_resume_path=tmp_path / "MASTER_RESUME.md",
         portfolio_base_url="http://127.0.0.1:9",
         data_dir=tmp_path / "data",
+        shared_password="",
     )
 
 
@@ -87,6 +88,28 @@ def test_api_errors_include_codes_and_request_ids(tmp_path: Path) -> None:
         oversized = client.post("/api/analyze", json={"text": "x" * 100_001})
         assert oversized.status_code == 422
         assert oversized.json()["code"] == "validation_error"
+
+
+def test_status_includes_progress_percentage(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    service = app.state.service
+    record = service._new_record("Acme", "Platform Engineer", "")
+    assert record.progress_pct == 5
+
+    record.status = "analyzing"
+    record.stage = "matching"
+    service.store.save(record)
+    with TestClient(app) as client:
+        status = client.get(f"/api/applications/{record.id}/status")
+    assert status.status_code == 200
+    assert status.json()["application"]["progress_pct"] == 40
+
+    record.status = "generating"
+    record.stage = "rendering"
+    assert record.progress_pct == 75
+    record.status = "generated"
+    record.stage = "done"
+    assert record.progress_pct == 100
 
 
 def test_unhandled_errors_do_not_leak_internal_details(tmp_path: Path) -> None:

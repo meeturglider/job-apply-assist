@@ -108,7 +108,12 @@
             <div class="micro" id="progress-stage">Working</div>
             <h2 id="progress-message">Analyzing the role...</h2>
           </div>
-          <div class="spinner" aria-hidden="true"></div>
+          <div class="progress-dial" id="progress-dial" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="progress-dial-inner">
+              <strong id="progress-percent">0%</strong>
+              <span>complete</span>
+            </div>
+          </div>
         </div>
         <ol class="progress-steps" id="progress-steps">
           <li>Fetch job description</li>

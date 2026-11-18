@@ -59,12 +59,21 @@ function hideNotice() {
   $("notice").hidden = true;
 }
 
+function setProgressDial(value) {
+  const pct = Math.max(0, Math.min(100, Number(value) || 0));
+  const dial = $("progress-dial");
+  dial.style.setProperty("--progress", `${pct}%`);
+  dial.setAttribute("aria-valuenow", String(pct));
+  $("progress-percent").textContent = `${pct}%`;
+}
+
 function showProgress(mode, message = "Working...") {
   state.mode = mode;
   $("empty-state").hidden = true;
   $("result").hidden = true;
   $("progress-card").hidden = false;
   $("progress-message").textContent = message;
+  setProgressDial(0);
   const steps = $("progress-steps");
   clear(steps);
   const labels =
@@ -78,6 +87,7 @@ function setProgress(record) {
   $("progress-card").hidden = false;
   $("progress-message").textContent = record.message || "Working...";
   $("progress-stage").textContent = (record.stage || "working").replaceAll("_", " ");
+  setProgressDial(record.progress_pct);
   const steps = [...$("progress-steps").children];
   const stageMap = {
     queued: 0,
@@ -92,7 +102,8 @@ function setProgress(record) {
   };
   const active = stageMap[record.stage] ?? 0;
   steps.forEach((step, index) => {
-    step.classList.toggle("active", index <= active);
+    step.classList.toggle("done", index < active);
+    step.classList.toggle("active", index === active);
   });
 }
 

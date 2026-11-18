@@ -440,18 +440,45 @@ h3 {
   font-size: 21px;
 }
 
-.spinner {
-  width: 30px;
-  height: 30px;
-  border: 3px solid rgba(96, 165, 250, 0.18);
-  border-top-color: var(--accent);
+.progress-dial {
+  --progress: 0%;
+  width: 72px;
+  height: 72px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
   border-radius: 50%;
-  animation: spin 700ms linear infinite;
+  background: conic-gradient(var(--accent) var(--progress), rgba(96, 165, 250, 0.14) 0);
+  box-shadow: 0 0 22px rgba(96, 165, 250, 0.16);
+  animation: progress-pulse 1.6s ease-in-out infinite;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+.progress-dial-inner {
+  width: 58px;
+  height: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #0d1524;
+}
+
+.progress-dial-inner strong {
+  font-size: 16px;
+  line-height: 1.1;
+}
+
+.progress-dial-inner span {
+  color: var(--faint);
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+@keyframes progress-pulse {
+  50% {
+    box-shadow: 0 0 30px rgba(96, 165, 250, 0.3);
   }
 }
 
@@ -470,6 +497,12 @@ h3 {
   border-radius: 999px;
   color: var(--faint);
   font-size: 11px;
+}
+
+.progress-steps li.done {
+  border-color: rgba(52, 211, 153, 0.3);
+  background: rgba(52, 211, 153, 0.08);
+  color: #86efac;
 }
 
 .progress-steps li.active {

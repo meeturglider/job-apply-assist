@@ -377,3 +377,13 @@ class ApplicationRecord(BaseModel):
     model: str = ""
     artifacts: list[ArtifactInfo] = Field(default_factory=list)
     error: str = ""
+
+    @property
+    def progress_pct(self) -> int:
+        if self.status in {"analyzed", "generated"}:
+            return 100
+        if self.status in {"error", "needs_paste"}:
+            return 0
+        if self.status == "generating":
+            return {"tailoring": 35, "rendering": 75}.get(self.stage, 15)
+        return {"queued": 5, "fetching": 15, "matching": 40, "analyzing": 70}.get(self.stage, 5)

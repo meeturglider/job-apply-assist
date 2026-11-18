@@ -57,6 +57,7 @@ def _settings(tmp_path: Path, master_text: str) -> Settings:
         portfolio_base_url="http://127.0.0.1:9",
         data_dir=tmp_path / "data",
         ollama_timeout_seconds=1,
+        shared_password="",
     )
 
 

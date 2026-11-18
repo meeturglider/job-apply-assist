@@ -362,7 +362,12 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         record = service.get(application_id)
         if record is None:
             raise HTTPException(status_code=404, detail="Application not found.")
-        return {"application": record.model_dump(mode="json")}
+        return {
+            "application": {
+                **record.model_dump(mode="json"),
+                "progress_pct": record.progress_pct,
+            }
+        }
 
     @app.get("/api/applications/{application_id}")
     async def application_detail(application_id: str) -> dict[str, object]:

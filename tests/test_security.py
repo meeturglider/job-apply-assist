@@ -49,13 +49,15 @@ async def test_service_shutdown_cancels_background_tasks(tmp_path: Path) -> None
 def _shared_settings(tmp_path: Path, master_text: str, **overrides: object) -> Settings:
     master = tmp_path / "MASTER_RESUME.md"
     master.write_text(master_text, encoding="utf-8")
-    return Settings(
-        llm_provider="none",
-        master_resume_path=master,
-        portfolio_base_url="http://127.0.0.1:9",
-        data_dir=tmp_path / "data",
-        **overrides,
-    )
+    defaults: dict[str, object] = {
+        "llm_provider": "none",
+        "master_resume_path": master,
+        "portfolio_base_url": "http://127.0.0.1:9",
+        "data_dir": tmp_path / "data",
+        "shared_password": "",
+    }
+    defaults.update(overrides)
+    return Settings(**defaults)
 
 
 def test_shared_password_gates_all_routes(tmp_path: Path, master_text: str) -> None:
