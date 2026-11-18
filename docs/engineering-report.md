@@ -169,7 +169,11 @@ the locally extracted candidate list, so the 8B model classifies and merges evid
 re-extracting the full JD.
 `OllamaClient.json` now:
 
-- validates JSON against the requested schema;
+- passes the Pydantic JSON schema to Ollama's structured-output mode so long resume plans are
+  generated in the requested shape;
+- validates JSON against the requested schema after parsing;
+- strips code fences/surrounding prose and trailing commas from model output;
+- uses a 32k context and 8k output-token budget by default to prevent truncated resume JSON;
 - retries malformed JSON or schema mismatches up to `OLLAMA_MAX_RETRIES`, capped at three;
 - applies bounded linear backoff;
 - avoids retrying non-retryable timeout and provider-disabled errors;
@@ -279,7 +283,7 @@ mypy app
 pytest -q
 ```
 
-Result at the time of this report: **97 tests passed**, Ruff clean, mypy clean. The only test
+Result at the time of this report: **99 tests passed**, Ruff clean, mypy clean. The only test
 warning is Starlette's upstream `TestClient`/`httpx` deprecation notice.
 
 Coverage includes scoring separation, evidence classes, dimension matching, education and
@@ -294,8 +298,8 @@ profile status, resume-before-analysis gating, contact extraction, outreach draf
 updates, prefill payloads, portal UI/extension controls, Google-style prompt constraints,
 unquantified-impact warnings, manual batched evidence-note reanalysis, optional GLiNER candidate
 extraction with bounded chunks and dedupe, candidate-only Ollama review, validated manual resume
-edits that regenerate every artifact, and automatic same-company role merging across HTML,
-Markdown, and DOCX rendering.
+edits that regenerate every artifact, browser-local editor drafts with stale-draft protection,
+and automatic same-company role merging across HTML, Markdown, and DOCX rendering.
 
 Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio JSON:
 
@@ -319,8 +323,8 @@ Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio
   HTTPS tunnel and keep `ALLOW_REGISTRATION=false` after provisioning known users.
 - If PDF generation fails, install Chromium with `playwright install chromium`. DOCX,
   Markdown, HTML, and DOCX ATS checks still work.
-- `LOG_LEVEL`, `OLLAMA_MAX_RETRIES`, and `OLLAMA_RETRY_BACKOFF_SECONDS` are available in
-  `.env.example`.
+- `LOG_LEVEL`, `OLLAMA_MAX_RETRIES`, `OLLAMA_RETRY_BACKOFF_SECONDS`, `OLLAMA_NUM_CTX`, and
+  `OLLAMA_MAX_PREDICT` are available in `.env.example`.
 - Generated artifacts contain personal data and remain gitignored.
 
 ## Known Limitations

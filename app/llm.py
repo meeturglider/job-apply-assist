@@ -26,14 +26,16 @@ def _extract_json(value: str) -> dict[str, Any]:
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise LLMError("The model did not return valid JSON.")
+    candidate = text[start : end + 1]
     try:
-        parsed = json.loads(text)
+        parsed = json.loads(candidate)
     except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise LLMError("The model did not return valid JSON.") from None
+        cleaned = re.sub(r",\s*([}\]])", r"\1", candidate)
         try:
-            parsed = json.loads(text[start : end + 1])
+            parsed = json.loads(cleaned)
         except json.JSONDecodeError as exc:
             raise LLMError(f"The model returned invalid JSON: {exc}") from exc
     if not isinstance(parsed, dict):
@@ -76,6 +78,8 @@ class OllamaClient:
         *,
         json_mode: bool = True,
         temperature: float = 0.1,
+        json_schema: dict[str, Any] | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         if not self.enabled:
             raise LLMError("LLM provider is disabled.", retryable=False)
@@ -88,12 +92,12 @@ class OllamaClient:
             "stream": False,
             "options": {
                 "temperature": temperature,
-                "num_ctx": 16384,
-                "num_predict": 2048,
+                "num_ctx": self.settings.ollama_num_ctx,
+                "num_predict": max_tokens or self.settings.ollama_max_predict,
             },
         }
         if json_mode:
-            payload["format"] = "json"
+            payload["format"] = json_schema or "json"
         if "qwen3" in self.settings.ollama_model.casefold():
             payload["think"] = False
         url = f"{self.settings.ollama_base_url.rstrip('/')}/api/chat"
@@ -133,9 +137,11 @@ class OllamaClient:
         schema: type[BaseModel] | None = None,
         operation: str = "llm_json",
         max_retries: int | None = None,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         retries = self.settings.ollama_max_retries if max_retries is None else max(0, max_retries)
         attempts = 1 + min(retries, 3)
+        json_schema = schema.model_json_schema() if schema is not None else None
         last_error: LLMError | None = None
         for attempt in range(1, attempts + 1):
             try:
@@ -144,6 +150,8 @@ class OllamaClient:
                     prompt,
                     json_mode=True,
                     temperature=temperature,
+                    json_schema=json_schema,
+                    max_tokens=max_tokens,
                 )
                 data = _extract_json(content)
                 if schema is not None:

@@ -31,6 +31,8 @@ class StubClient(OllamaClient):
         *,
         json_mode: bool = True,
         temperature: float = 0.1,
+        json_schema: dict[str, object] | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         self.calls += 1
         self.system = system

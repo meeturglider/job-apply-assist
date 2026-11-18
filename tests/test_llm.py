@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.config import Settings
 from app.jd.analyze import analyze_job
-from app.llm import LLMError, OllamaClient
+from app.llm import LLMError, OllamaClient, _extract_json
 from app.llm_schemas import LLMJobExtraction
 
 
@@ -36,12 +36,21 @@ class StubClient(OllamaClient):
         *,
         json_mode: bool = True,
         temperature: float = 0.1,
+        json_schema: dict[str, object] | None = None,
+        max_tokens: int | None = None,
     ) -> str:
+        self.last_schema = json_schema
+        self.last_max_tokens = max_tokens
         self.calls += 1
         value = self.responses.pop(0)
         if isinstance(value, Exception):
             raise value
         return str(value)
+
+
+def test_extract_json_repairs_trailing_commas_and_prose() -> None:
+    value = 'Here is the result:\n```json\n{"title":"Role","items":["a",],}\n```\nThanks.'
+    assert _extract_json(value) == {"title": "Role", "items": ["a"]}
 
 
 def test_json_retries_invalid_json_then_validates_schema() -> None:
@@ -55,6 +64,14 @@ def test_json_retries_invalid_json_then_validates_schema() -> None:
     assert data == {"title": "Platform Engineer", "must_have": ["Kubernetes"]}
     assert client.calls == 2
     assert client.last_attempts == 2
+    assert client.last_schema and client.last_schema["type"] == "object"
+    assert "must_have" in client.last_schema["properties"]
+
+
+def test_json_forwards_output_budget_to_chat() -> None:
+    client = StubClient(['{"title": "Platform Engineer"}'])
+    asyncio.run(client.json("system", "prompt", schema=SampleSchema, max_tokens=4096))
+    assert client.last_max_tokens == 4096
 
 
 def test_json_retries_invalid_schema_then_succeeds() -> None:

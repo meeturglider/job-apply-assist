@@ -4,6 +4,8 @@ const state = {
   mode: "analysis",
   detail: null,
   resumeDraft: null,
+  resumeDraftBase: "",
+  lastRestoredDraft: "",
   portalMode: false,
   allowRegistration: false,
   authMode: "login",
@@ -24,6 +26,77 @@ function el(tag, className, text) {
 
 function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
+}
+
+const RESUME_DRAFT_PREFIX = "job-assist:resume-draft:";
+
+function resumeDraftKey(applicationId) {
+  return `${RESUME_DRAFT_PREFIX}${applicationId}`;
+}
+
+function resumeFingerprint(value) {
+  const text = JSON.stringify(value || {});
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function loadResumeDraft(applicationId) {
+  try {
+    const raw = localStorage.getItem(resumeDraftKey(applicationId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== 1 || parsed.applicationId !== applicationId) return null;
+    if (!parsed.resume || typeof parsed.resume !== "object") return null;
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+function clearResumeDraft(applicationId) {
+  if (!applicationId) return;
+  try {
+    localStorage.removeItem(resumeDraftKey(applicationId));
+  } catch (_) {
+    return;
+  }
+}
+
+function clearAllResumeDrafts() {
+  try {
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith(RESUME_DRAFT_PREFIX))
+      .forEach((key) => localStorage.removeItem(key));
+  } catch (_) {
+    return;
+  }
+}
+
+function persistResumeDraft() {
+  const applicationId = state.currentId;
+  if (!applicationId || !state.resumeDraft || !state.detail) return;
+  if (resumeFingerprint(state.resumeDraft) === state.resumeDraftBase) {
+    clearResumeDraft(applicationId);
+    return;
+  }
+  try {
+    localStorage.setItem(
+      resumeDraftKey(applicationId),
+      JSON.stringify({
+        version: 1,
+        applicationId,
+        baseFingerprint: state.resumeDraftBase,
+        resume: state.resumeDraft,
+        savedAt: new Date().toISOString(),
+      }),
+    );
+  } catch (_) {
+    return;
+  }
 }
 
 async function api(path, options = {}) {
@@ -820,6 +893,27 @@ function renderGenerated(detail) {
 
   renderAts(detail.ats_report);
   renderValidation(detail.validation);
+  restoreResumeDraft(detail);
+}
+
+function restoreResumeDraft(detail) {
+  const applicationId = detail.record.id;
+  const saved = loadResumeDraft(applicationId);
+  if (!saved) return;
+  if (saved.baseFingerprint !== resumeFingerprint(detail.resume)) {
+    clearResumeDraft(applicationId);
+    return;
+  }
+  state.currentId = applicationId;
+  state.detail = detail;
+  state.resumeDraft = cloneResume(saved.resume);
+  state.resumeDraftBase = saved.baseFingerprint;
+  renderResumeEditor();
+  $("resume-editor").hidden = false;
+  if (state.lastRestoredDraft !== applicationId) {
+    state.lastRestoredDraft = applicationId;
+    showNotice("Restored your unsaved resume edits.", "success");
+  }
 }
 
 function cloneResume(resume) {
@@ -990,6 +1084,7 @@ function syncResumeDraftFromEditor() {
     const field = node.dataset.projectField;
     project[field] = field === "bullets" ? parseLineList(node.value) : node.value.trim();
   });
+  persistResumeDraft();
 }
 
 function renderResumeEditor() {
@@ -1168,8 +1263,11 @@ function renderResumeEditor() {
   const cancel = el("button", "ghost-button", "Cancel");
   cancel.type = "button";
   cancel.addEventListener("click", () => {
+    clearResumeDraft(state.currentId);
     editor.hidden = true;
     state.resumeDraft = null;
+    state.resumeDraftBase = "";
+    state.lastRestoredDraft = "";
   });
   actions.appendChild(save);
   actions.appendChild(cancel);
@@ -1182,10 +1280,19 @@ function toggleResumeEditor() {
     syncResumeDraftFromEditor();
     editor.hidden = true;
     state.resumeDraft = null;
+    state.resumeDraftBase = "";
     return;
   }
-  if (!state.detail?.resume) return;
-  state.resumeDraft = cloneResume(state.detail.resume);
+  if (!state.detail?.resume || !state.currentId) return;
+  const saved = loadResumeDraft(state.currentId);
+  if (saved && saved.baseFingerprint === resumeFingerprint(state.detail.resume)) {
+    state.resumeDraft = cloneResume(saved.resume);
+    state.resumeDraftBase = saved.baseFingerprint;
+  } else {
+    clearResumeDraft(state.currentId);
+    state.resumeDraft = cloneResume(state.detail.resume);
+    state.resumeDraftBase = resumeFingerprint(state.detail.resume);
+  }
   renderResumeEditor();
   editor.hidden = false;
 }
@@ -1198,10 +1305,15 @@ async function saveResumeEdits() {
   button.disabled = true;
   button.textContent = "Saving edits...";
   try {
-    const detail = await api(`/api/applications/${state.currentId}/resume`, {
+    const savedId = state.currentId;
+    const detail = await api(`/api/applications/${savedId}/resume`, {
       method: "PUT",
       body: JSON.stringify(resume),
     });
+    clearResumeDraft(savedId);
+    state.resumeDraft = null;
+    state.resumeDraftBase = "";
+    state.lastRestoredDraft = "";
     renderDetail(detail);
     showNotice("Resume edits applied. Preview and downloads refreshed.", "success");
   } catch (error) {
@@ -1578,6 +1690,10 @@ async function logout() {
   state.accountEmail = "";
   state.currentId = null;
   state.detail = null;
+  state.resumeDraft = null;
+  state.resumeDraftBase = "";
+  state.lastRestoredDraft = "";
+  clearAllResumeDrafts();
   stopPolling();
   showAuthPanel();
 }

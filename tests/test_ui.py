@@ -60,6 +60,10 @@ def test_ui_exposes_structured_resume_editor() -> None:
     assert 'method: "PUT"' in script
     assert "/resume`, {" in script
     assert "Manually edited" in script
+    assert 'const RESUME_DRAFT_PREFIX = "job-assist:resume-draft:"' in script
+    assert "localStorage.setItem" in script
+    assert "Restored your unsaved resume edits." in script
+    assert "clearAllResumeDrafts();" in script
     assert ".icon-button" in styles
 
 

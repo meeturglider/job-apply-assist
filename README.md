@@ -151,7 +151,9 @@ fields by topic, uses `+` controls to add skill groups, experience entries, role
 bullets, and allows company, role, and date edits. Multiple roles at the same employer are merged
 automatically into one company block with each role and date range shown once. Saving revalidates
 every edit against the uploaded evidence, rejects unsupported claims or invented metrics, rewrites
-all formats plus the validation and ATS reports, and marks the artifact as manually edited.
+all formats plus the validation and ATS reports, and marks the artifact as manually edited. Unsaved
+editor changes are autosaved in this browser and restored after a refresh; Cancel or a successful
+Save clears the local draft.
 
 ## Reviewing Evidence and Notes
 
@@ -181,9 +183,11 @@ See `.env.example`. Key settings:
 | `LLM_PROVIDER` | `ollama` | Set to `none` for deterministic-only mode. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama endpoint. |
 | `OLLAMA_MODEL` | `qwen3:8b` | Model used for candidate review, suggestions, and tailoring. |
-| `OLLAMA_TIMEOUT_SECONDS` | `300` | Per-request timeout. |
+| `OLLAMA_TIMEOUT_SECONDS` | `600` | Per-request timeout; long resumes need more time. |
 | `OLLAMA_MAX_RETRIES` | `1` | Retries for malformed or failed LLM JSON responses. |
 | `OLLAMA_RETRY_BACKOFF_SECONDS` | `1` | Base backoff between LLM retries. |
+| `OLLAMA_NUM_CTX` | `32768` | Context window sent to Ollama; raise for long resumes. |
+| `OLLAMA_MAX_PREDICT` | `8192` | Maximum generated tokens; raise if long JSON is truncated. |
 | `NLP_PROVIDER` | `none` | Set to `gliner` after installing `.[nlp]`. |
 | `NLP_MODEL` | `gliner-community/gliner_small-v2.5` | Hugging Face model used by GLiNER. |
 | `NLP_MODEL_PATH` | empty | Local model directory for offline use; overrides `NLP_MODEL`. |
