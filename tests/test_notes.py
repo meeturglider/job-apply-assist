@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.config import Settings
-from app.models import AnalysisNote
+from app.models import AnalysisNote, TailoredResume
 from app.profile.master_resume import parse_master_resume_text
 from app.profile.notes import apply_notes
 from app.service import ApplicationService
@@ -70,6 +70,44 @@ async def test_notes_revalidate_and_gate_generation(tmp_path: Path, master_text:
         assert await _wait(service, record.id, {"generated"}) == "generated"
         metadata = service.analysis_payload(record.id)["metadata"]
         assert metadata["evidence_sources"]["evidence_counts"].get("user_note", 0) >= 1
+    finally:
+        await service.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_manual_resume_edits_are_validated_and_regenerated(
+    tmp_path: Path, master_text: str
+) -> None:
+    service = ApplicationService(_settings(tmp_path, master_text))
+    try:
+        record = service.start_analysis(text=JD, company="Acme", role="Platform Engineer")
+        assert await _wait(service, record.id, {"analyzed"}) == "analyzed"
+        service.start_generation(record.id)
+        assert await _wait(service, record.id, {"generated"}) == "generated"
+
+        payload = service.analysis_payload(record.id)
+        resume = TailoredResume.model_validate(payload["resume"])
+        edited_summary = (
+            "Platform engineer with experience building secure cloud platforms and "
+            "reliable delivery pipelines."
+        )
+        resume.summary = edited_summary
+        updated = await service.update_resume(record.id, resume)
+
+        assert updated["resume"]["summary"] == edited_summary
+        assert edited_summary in updated["resume_markdown"]
+        assert updated["metadata"]["method"] == "manual-edit"
+        assert updated["record"]["status"] == "generated"
+        assert (
+            updated["record"]["message"]
+            == "Resume edits applied. Preview and downloads were refreshed."
+        )
+        assert any(artifact["kind"] == "html" for artifact in updated["record"]["artifacts"])
+
+        unsupported = TailoredResume.model_validate(updated["resume"])
+        unsupported.experience[0].bullets.append("Increased revenue by 999%.")
+        with pytest.raises(ValueError, match="Unsupported"):
+            await service.update_resume(record.id, unsupported)
     finally:
         await service.shutdown()
 

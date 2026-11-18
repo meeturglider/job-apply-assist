@@ -35,6 +35,7 @@ from app.models import (
     EmailDraft,
     JobDescription,
     PrefillFields,
+    TailoredResume,
     TrackerStatus,
     ValidationReport,
 )
@@ -48,6 +49,7 @@ from app.rendering.markdown import resume_markdown
 from app.rendering.pdf import RenderError, render_pdf
 from app.store import ApplicationStore, MemoryApplicationStore
 from app.tailoring.builder import build_resume
+from app.tailoring.validator import validate_resume
 
 logger = logging.getLogger(__name__)
 
@@ -371,7 +373,7 @@ class ApplicationService:
             record,
             status="analyzed",
             stage="notes",
-            message="Evidence notes changed. Revalidate before generating.",
+            message="Evidence notes saved. Reanalyzing with your notes.",
             notes=notes,
             notes_revision=revision,
             notes_validated_revision="",
@@ -492,6 +494,130 @@ class ApplicationService:
         self._track(task)
         return record
 
+    async def _render_resume(
+        self,
+        application_id: str,
+        *,
+        resume: TailoredResume,
+        validation: ValidationReport,
+        method: str,
+        llm_attempts: int = 0,
+        error: str = "",
+    ) -> ApplicationRecord:
+        record = self.store.get(application_id)
+        if record is None:
+            raise ValueError("Application not found.")
+        job = JobDescription.model_validate_json(self._read_text(application_id, "job.json"))
+        analysis = AnalysisResult.model_validate_json(
+            self._read_text(application_id, "analysis.json")
+        )
+        profile = self._read_profile(application_id)
+        markdown = resume_markdown(resume)
+        html = resume_html(resume)
+        self._write(application_id, "resume.json", resume.model_dump_json(indent=2))
+        self._write(application_id, "resume.md", markdown)
+        self._write(application_id, "resume.html", html)
+        self._write(application_id, "validation.json", validation.model_dump_json(indent=2))
+
+        artifacts: list[ArtifactInfo] = []
+        artifacts.append(self._artifact(application_id, "markdown", "resume.md"))
+        artifacts.append(self._artifact(application_id, "html", "resume.html"))
+
+        pdf_error = ""
+        ats_report: AtsReport
+        with self.artifacts.render_dir(application_id) as render_dir:
+            docx_path = render_dir / "resume.docx"
+            render_docx(resume, docx_path)
+            self._write(application_id, "resume.docx", docx_path.read_bytes())
+            artifacts.append(self._artifact(application_id, "docx", "resume.docx"))
+
+            pdf_path = render_dir / "resume.pdf"
+            try:
+                await render_pdf(html, pdf_path)
+                self._write(application_id, "resume.pdf", pdf_path.read_bytes())
+                artifacts.append(self._artifact(application_id, "pdf", "resume.pdf"))
+            except RenderError as exc:
+                pdf_error = str(exc)
+
+            if pdf_error:
+                checks = [AtsCheck(name="PDF rendering", passed=False, detail=pdf_error)]
+                try:
+                    checks.extend(check_docx(resume, docx_path))
+                except Exception as exc:
+                    checks.append(
+                        AtsCheck(
+                            name="DOCX text extraction",
+                            passed=False,
+                            detail=f"DOCX verification failed: {exc}",
+                        )
+                    )
+                ats_report = AtsReport(checks=checks)
+            else:
+                try:
+                    ats_report = check_ats(resume, markdown, pdf_path, job, html, docx_path)
+                except Exception as exc:
+                    ats_report = AtsReport(
+                        checks=[
+                            AtsCheck(
+                                name="ATS inspection",
+                                passed=False,
+                                detail=f"ATS text extraction failed: {exc}",
+                            )
+                        ]
+                    )
+        self._write(application_id, "ats_report.json", ats_report.model_dump_json(indent=2))
+
+        metadata = {
+            "application_id": application_id,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "method": method,
+            "model": self.settings.ollama_model,
+            "job_title": job.title,
+            "company": job.company,
+            "score": analysis.score.total,
+            "validation": validation.model_dump(mode="json"),
+            "llm_attempts": llm_attempts,
+            "ats": ats_report.model_dump(),
+            "pdf_error": pdf_error,
+            "notes_revision": record.notes_revision,
+            "evidence_sources": profile.provenance.model_dump(),
+        }
+        self._write(
+            application_id,
+            "metadata.json",
+            json.dumps(metadata, indent=2, ensure_ascii=False),
+        )
+        method_labels = {
+            "llm": "LLM tailoring",
+            "llm-sanitized": "LLM tailoring with sanitization",
+            "deterministic": "deterministic selection",
+            "deterministic-fallback": "deterministic fallback",
+            "manual-edit": "manual edits",
+        }
+        message = f"Resume generated with {method_labels.get(method, method)}."
+        if pdf_error:
+            message += " PDF rendering needs Playwright Chromium: playwright install chromium."
+        if error:
+            message = error
+            if pdf_error:
+                message += " PDF rendering needs Playwright Chromium: playwright install chromium."
+        logger.info(
+            "generation_completed",
+            extra={
+                "application_id": application_id,
+                "method": method,
+                "artifact_count": len(artifacts),
+            },
+        )
+        return self._update(
+            record,
+            status="generated",
+            stage="done",
+            message=message,
+            error=error or pdf_error,
+            artifacts=artifacts,
+        )
+
     async def _generate(self, application_id: str) -> None:
         record = self.store.get(application_id)
         if record is None:
@@ -516,104 +642,12 @@ class ApplicationService:
                 stage="rendering",
                 message="Rendering Markdown, HTML, DOCX, and PDF...",
             )
-            markdown = resume_markdown(resume)
-            html = resume_html(resume)
-            self._write(application_id, "resume.json", resume.model_dump_json(indent=2))
-            self._write(application_id, "resume.md", markdown)
-            self._write(application_id, "resume.html", html)
-            self._write(application_id, "validation.json", validation.model_dump_json(indent=2))
-
-            artifacts: list[ArtifactInfo] = []
-            artifacts.append(self._artifact(application_id, "markdown", "resume.md"))
-            artifacts.append(self._artifact(application_id, "html", "resume.html"))
-
-            pdf_error = ""
-            ats_report: AtsReport
-            with self.artifacts.render_dir(application_id) as render_dir:
-                docx_path = render_dir / "resume.docx"
-                render_docx(resume, docx_path)
-                self._write(application_id, "resume.docx", docx_path.read_bytes())
-                artifacts.append(self._artifact(application_id, "docx", "resume.docx"))
-
-                pdf_path = render_dir / "resume.pdf"
-                try:
-                    await render_pdf(html, pdf_path)
-                    self._write(application_id, "resume.pdf", pdf_path.read_bytes())
-                    artifacts.append(self._artifact(application_id, "pdf", "resume.pdf"))
-                except RenderError as exc:
-                    pdf_error = str(exc)
-
-                if pdf_error:
-                    checks = [AtsCheck(name="PDF rendering", passed=False, detail=pdf_error)]
-                    try:
-                        checks.extend(check_docx(resume, docx_path))
-                    except Exception as exc:
-                        checks.append(
-                            AtsCheck(
-                                name="DOCX text extraction",
-                                passed=False,
-                                detail=f"DOCX verification failed: {exc}",
-                            )
-                        )
-                    ats_report = AtsReport(checks=checks)
-                else:
-                    try:
-                        ats_report = check_ats(resume, markdown, pdf_path, job, html, docx_path)
-                    except Exception as exc:
-                        ats_report = AtsReport(
-                            checks=[
-                                AtsCheck(
-                                    name="ATS inspection",
-                                    passed=False,
-                                    detail=f"ATS text extraction failed: {exc}",
-                                )
-                            ]
-                        )
-            self._write(application_id, "ats_report.json", ats_report.model_dump_json(indent=2))
-
-            metadata = {
-                "application_id": application_id,
-                "generated_at": datetime.now(UTC).isoformat(),
-                "method": method,
-                "model": self.settings.ollama_model,
-                "job_title": job.title,
-                "company": job.company,
-                "score": analysis.score.total,
-                "validation": validation.model_dump(),
-                "ats": ats_report.model_dump(),
-                "pdf_error": pdf_error,
-                "notes_revision": record.notes_revision,
-                "evidence_sources": profile.provenance.model_dump(),
-            }
-            self._write(
+            await self._render_resume(
                 application_id,
-                "metadata.json",
-                json.dumps(metadata, indent=2, ensure_ascii=False),
-            )
-            method_labels = {
-                "llm": "LLM tailoring",
-                "llm-sanitized": "LLM tailoring with sanitization",
-                "deterministic": "deterministic selection",
-                "deterministic-fallback": "deterministic fallback",
-            }
-            message = f"Resume generated with {method_labels.get(method, method)}."
-            if pdf_error:
-                message += " PDF rendering needs Playwright Chromium: playwright install chromium."
-            self._update(
-                record,
-                status="generated",
-                stage="done",
-                message=message,
-                error=pdf_error,
-                artifacts=artifacts,
-            )
-            logger.info(
-                "generation_completed",
-                extra={
-                    "application_id": application_id,
-                    "method": method,
-                    "artifact_count": len(artifacts),
-                },
+                resume=resume,
+                validation=validation,
+                method=method,
+                llm_attempts=validation.llm_attempts,
             )
         except Exception:
             logger.exception("generation_failed", extra={"application_id": application_id})
@@ -624,6 +658,28 @@ class ApplicationService:
                 message="Resume generation failed unexpectedly. Check the app logs for details.",
                 error="internal_error",
             )
+
+    async def update_resume(self, application_id: str, resume: TailoredResume) -> dict[str, object]:
+        record = self.store.get(application_id)
+        if record is None:
+            raise ValueError("Application not found.")
+        if record.status != "generated":
+            raise ValueError("Generate a resume before editing it.")
+        job = JobDescription.model_validate_json(self._read_text(application_id, "job.json"))
+        profile = self._read_profile(application_id)
+        validation = validate_resume(resume, profile, job)
+        errors = [issue.message for issue in validation.issues if issue.severity == "error"]
+        if errors:
+            raise ValueError(errors[0])
+        logger.info("resume_edits_applied", extra={"application_id": application_id})
+        await self._render_resume(
+            application_id,
+            resume=resume,
+            validation=validation,
+            method="manual-edit",
+            error="Resume edits applied. Preview and downloads were refreshed.",
+        )
+        return self.analysis_payload(application_id)
 
     def _artifact(self, application_id: str, kind: str, filename: str) -> ArtifactInfo:
         return ArtifactInfo(

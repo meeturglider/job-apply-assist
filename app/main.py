@@ -29,6 +29,7 @@ from app.auth import (
 )
 from app.config import Settings, settings
 from app.jd.fetcher import FetchError, validate_url
+from app.models import TailoredResume
 from app.profile.memory_service import MemoryProfileService
 from app.service import ApplicationService
 from app.store import MemoryApplicationStore
@@ -658,6 +659,17 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"application": record.model_dump(mode="json")}
+
+    @app.put("/api/applications/{application_id}/resume")
+    async def update_resume(
+        request: Request, application_id: str, payload: TailoredResume
+    ) -> dict[str, object]:
+        try:
+            return await _workspace(request).update_resume(application_id, payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/api/applications/{application_id}/contacts")
     async def add_contact(

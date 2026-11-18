@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from app.llm import LLMError
 from app.matching.scorer import analyze_match
@@ -60,6 +61,29 @@ def test_validator_flags_unsupported_skills_and_numbers(profile: CandidateProfil
     assert report.valid is False
     assert any("COBOL" in message for message in messages)
     assert any("99%" in message for message in messages)
+
+
+def test_tailoring_prompt_locks_google_style() -> None:
+    prompt = (Path(__file__).parents[1] / "prompts/resume_tailor.md").read_text(encoding="utf-8")
+    assert "X, Y, Z" in prompt
+    assert "Never invent" in prompt
+    assert "simple single-column structure" in prompt
+    assert "without inventing one" in prompt
+
+
+def test_validator_warns_when_recent_bullets_lack_metrics(profile: CandidateProfile) -> None:
+    resume = _resume(profile)
+    resume.skills[0].items = ["Kubernetes", "Terraform"]
+    resume.experience[0].bullets = [
+        "Built GCP landing zones with Terraform and Kubernetes.",
+        "Automated CI/CD pipelines with Jenkins and Python.",
+    ]
+    report = validate_resume(resume, profile, _job())
+    assert report.valid is True
+    assert any(
+        issue.severity == "warning" and "No quantified impact" in issue.message
+        for issue in report.issues
+    )
 
 
 def test_sanitizer_removes_unsupported_claims(profile: CandidateProfile) -> None:

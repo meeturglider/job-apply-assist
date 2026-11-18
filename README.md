@@ -126,6 +126,23 @@ files; only `data/accounts.db` persists.
 9. Run ATS checks on the PDF (selectable text, page length, sections, tables, keyword
    coverage) and store the report.
 
+### Locked Resume Design
+
+The generator uses a Google-style default: a clean single-column ATS-safe PDF, standard fonts,
+consistent spacing, no tables/columns/photos/icons, reverse-chronological experience, and a
+concise targeted summary. Skills and programming languages stay near the top for ATS and
+recruiter scanning. Bullets follow X/Y/Z ("accomplished X, measured by Y, by doing Z") when the
+source supplies a metric; the app never invents numbers and warns when recent bullets lack
+quantified impact.
+
+### Editing the Generated Resume
+
+Generated resumes can be refined in the browser before download. The structured editor exposes
+the targeted summary, skill groups, and experience/project bullets; names, dates, employers,
+education, and certifications stay fixed to preserve claim traceability. Saving revalidates every
+edit against the uploaded evidence, rejects unsupported claims or invented metrics, rewrites all
+formats plus the validation and ATS reports, and marks the artifact as manually edited.
+
 ## Reviewing Evidence and Notes
 
 The UI shows a progress percentage while analysis and generation run. After analysis, the
@@ -139,9 +156,10 @@ keyword, while matches show the origin mix behind their evidence.
 
 Application-specific evidence notes can be added for a target skill. A note must mention its
 target to be accepted; accepted notes are tagged as `User note` and any dates, metrics, titles,
-or outcome claims are flagged for review. Saving notes marks the analysis stale, so **Revalidate
-notes** must be run before generating a tailored resume. Revalidation keeps the original
-baseline analysis for comparison and applies the same claim validation as the main pipeline.
+or outcome claims are flagged for review. Saving notes triggers revalidation automatically, so
+the refreshed analysis is ready before generating a tailored resume. Revalidation keeps the
+original baseline analysis for comparison and applies the same claim validation as the main
+pipeline.
 
 ## Configuration
 

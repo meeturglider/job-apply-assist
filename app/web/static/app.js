@@ -7,6 +7,7 @@ const state = {
   allowRegistration: false,
   authMode: "login",
   profileReady: false,
+  revalidating: false,
   csrf: "",
   accountEmail: "",
 };
@@ -105,22 +106,34 @@ function setProgress(record) {
   $("progress-stage").textContent = (record.stage || "working").replaceAll("_", " ");
   setProgressDial(record.progress_pct);
   const steps = [...$("progress-steps").children];
-  const stageMap = {
-    queued: 0,
-    fetching: 0,
-    matching: 2,
-    notes: 2,
-    extracting: 1,
-    scoring: 3,
-    suggestions: 3,
-    analyzing: 3,
-    tailoring: 1,
-    rendering: 2,
-    manual_paste: 0,
-    done: 3,
-    error: 0,
+  const stageMaps = {
+    analysis: {
+      queued: 0,
+      fetching: 0,
+      manual_paste: 0,
+      extracting: 1,
+      matching: 2,
+      scoring: 3,
+      suggestions: 3,
+      analyzing: 3,
+      done: 3,
+      error: 0,
+    },
+    generation: {
+      tailoring: 1,
+      rendering: 3,
+      done: 3,
+      error: 0,
+    },
+    revalidation: {
+      notes: 0,
+      scoring: 1,
+      suggestions: 2,
+      done: 3,
+      error: 0,
+    },
   };
-  const active = stageMap[record.stage] ?? 0;
+  const active = (stageMaps[state.mode] ?? stageMaps.analysis)[record.stage] ?? 0;
   steps.forEach((step, index) => {
     step.classList.toggle("done", index < active);
     step.classList.toggle("active", index === active);
@@ -330,10 +343,11 @@ async function saveApplicationNotes(entries) {
   renderAnalysis(state.detail);
   showNotice(
     notesPending(data.application)
-      ? "Evidence note saved. Revalidate before generating."
-      : "Evidence notes updated.",
+      ? "Evidence note saved. Reanalyzing with your note..."
+      : "Evidence notes updated. Reanalyzing with your notes...",
     "success",
   );
+  await revalidateNotes();
 }
 
 function noteEditor(target) {
@@ -401,7 +415,8 @@ function noteEditor(target) {
 }
 
 async function revalidateNotes() {
-  if (!state.currentId) return;
+  if (!state.currentId || state.revalidating) return;
+  state.revalidating = true;
   const button = $("revalidate-button");
   button.disabled = true;
   button.textContent = "Revalidating...";
@@ -411,8 +426,10 @@ async function revalidateNotes() {
       body: "{}",
     });
     showProgress("revalidation", "Revalidating evidence notes...");
+    stopPolling();
     poll();
   } catch (error) {
+    state.revalidating = false;
     showNotice(error.message, "error");
     button.disabled = false;
     button.textContent = "Revalidate notes";
@@ -764,11 +781,14 @@ function renderGenerated(detail) {
   const artifacts = record.artifacts || [];
   const hasArtifacts = artifacts.length > 0 && record.status === "generated";
   generated.hidden = !hasArtifacts;
+  $("resume-editor").hidden = true;
   if (!hasArtifacts) return;
 
   const metadata = detail.metadata || {};
-  const usedLlm = String(metadata.method || "").startsWith("llm");
-  const method = usedLlm ? "LLM-tailored" : "Deterministic";
+  const rawMethod = String(metadata.method || "");
+  const usedLlm = rawMethod.startsWith("llm");
+  const method =
+    rawMethod === "manual-edit" ? "Manually edited" : usedLlm ? "LLM-tailored" : "Deterministic";
   const model = metadata.model && usedLlm ? ` · ${metadata.model}` : "";
   const sourceCounts = metadata.evidence_sources?.evidence_counts || {};
   const sourceMix = Object.entries(sourceCounts)
@@ -797,6 +817,144 @@ function renderGenerated(detail) {
 
   renderAts(detail.ats_report);
   renderValidation(detail.validation);
+}
+
+function parseLineList(value) {
+  return String(value || "")
+    .split("\n")
+    .map((line) => line.trim().replace(/^[-*•]\s*/, ""))
+    .filter(Boolean);
+}
+
+function parseInlineList(value) {
+  return String(value || "")
+    .split(/[,;]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseSkillGroups(value) {
+  return parseLineList(value)
+    .map((line) => {
+      const separator = line.indexOf(":");
+      if (separator === -1) {
+        return { category: "Skills", items: parseInlineList(line) };
+      }
+      return {
+        category: line.slice(0, separator).trim() || "Skills",
+        items: parseInlineList(line.slice(separator + 1)),
+      };
+    })
+    .filter((group) => group.items.length > 0);
+}
+
+function addEditorTextarea(container, label, value, field) {
+  const wrapper = el("label", "", label);
+  const textarea = el("textarea", "note-input");
+  textarea.value = value || "";
+  textarea.dataset.resumeField = field;
+  wrapper.appendChild(textarea);
+  container.appendChild(wrapper);
+}
+
+function renderResumeEditor() {
+  const editor = $("resume-editor");
+  const resume = state.detail?.resume;
+  clear(editor);
+  if (!resume) {
+    editor.appendChild(el("p", "muted", "Resume content is unavailable."));
+    return;
+  }
+  const grid = el("div", "resume-editor-grid");
+  addEditorTextarea(grid, "Targeted summary", resume.summary || "", "summary");
+  addEditorTextarea(
+    grid,
+    "Skills (one category per line: Category: item, item)",
+    (resume.skills || [])
+      .map((group) => `${group.category}: ${(group.items || []).join(", ")}`)
+      .join("\n"),
+    "skills",
+  );
+  (resume.experience || []).forEach((entry, index) => {
+    const heading = `${entry.role || "Role"} — ${entry.company || "Company"}`;
+    addEditorTextarea(
+      grid,
+      `${heading} bullets (one per line)`,
+      (entry.bullets || []).join("\n"),
+      `experience:${index}`,
+    );
+  });
+  (resume.projects || []).forEach((entry, index) => {
+    const heading = `${entry.name || "Project"}${entry.context ? ` — ${entry.context}` : ""}`;
+    addEditorTextarea(
+      grid,
+      `${heading} bullets (one per line)`,
+      (entry.bullets || []).join("\n"),
+      `project:${index}`,
+    );
+  });
+  editor.appendChild(grid);
+
+  const actions = el("div", "resume-editor-actions");
+  const save = el("button", "primary-button", "Save resume edits");
+  save.id = "save-resume-edits";
+  save.type = "button";
+  save.addEventListener("click", saveResumeEdits);
+  const cancel = el("button", "ghost-button", "Cancel");
+  cancel.type = "button";
+  cancel.addEventListener("click", () => {
+    editor.hidden = true;
+  });
+  actions.appendChild(save);
+  actions.appendChild(cancel);
+  editor.appendChild(actions);
+}
+
+function toggleResumeEditor() {
+  const editor = $("resume-editor");
+  if (!editor.hidden) {
+    editor.hidden = true;
+    return;
+  }
+  renderResumeEditor();
+  editor.hidden = false;
+}
+
+async function saveResumeEdits() {
+  if (!state.currentId || !state.detail?.resume) return;
+  const editor = $("resume-editor");
+  const resume = JSON.parse(JSON.stringify(state.detail.resume));
+  editor.querySelectorAll("[data-resume-field]").forEach((node) => {
+    const field = node.dataset.resumeField;
+    if (field === "summary") {
+      resume.summary = node.value.trim();
+      return;
+    }
+    if (field === "skills") {
+      resume.skills = parseSkillGroups(node.value);
+      return;
+    }
+    const [kind, index] = field.split(":");
+    const target =
+      kind === "experience" ? resume.experience?.[Number(index)] : resume.projects?.[Number(index)];
+    if (target) target.bullets = parseLineList(node.value);
+  });
+
+  const button = $("save-resume-edits");
+  button.disabled = true;
+  button.textContent = "Saving edits...";
+  try {
+    const detail = await api(`/api/applications/${state.currentId}/resume`, {
+      method: "PUT",
+      body: JSON.stringify(resume),
+    });
+    renderDetail(detail);
+    showNotice("Resume edits applied. Preview and downloads refreshed.", "success");
+  } catch (error) {
+    showNotice(error.message || "Could not save resume edits.", "error");
+    button.disabled = false;
+    button.textContent = "Save resume edits";
+  }
 }
 
 function renderAts(report) {
@@ -953,6 +1111,7 @@ async function poll() {
       return;
     }
     stopPolling();
+    state.revalidating = false;
     $("analyze-button").disabled = false;
     $("analyze-button").textContent = "Analyze match";
     const detail = await api(`/api/applications/${state.currentId}`);
@@ -964,6 +1123,7 @@ async function poll() {
     refreshHistory();
   } catch (error) {
     stopPolling();
+    state.revalidating = false;
     showNotice(error.message, "error");
     $("analyze-button").disabled = false;
     $("analyze-button").textContent = "Analyze match";
@@ -1191,6 +1351,7 @@ async function boot() {
 
 $("analyze-form").addEventListener("submit", submitAnalysis);
 $("generate-button").addEventListener("click", generateResume);
+$("edit-resume-button").addEventListener("click", toggleResumeEditor);
 $("revalidate-button").addEventListener("click", revalidateNotes);
 $("refresh-profile").addEventListener("click", refreshProfile);
 $("upload-resume").addEventListener("click", uploadResume);

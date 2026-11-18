@@ -153,6 +153,22 @@ def _technologies_issues(
     return issues
 
 
+def _impact_issues(resume: TailoredResume) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    for entry in resume.experience[:2]:
+        bullets = [bullet for bullet in entry.bullets if bullet.strip()]
+        if not bullets or any(re.search(r"\d", bullet) for bullet in bullets):
+            continue
+        issues.append(
+            ValidationIssue(
+                severity="warning",
+                location=f"experience/{entry.company}",
+                message="No quantified impact found; add a sourced metric or concrete scope.",
+            )
+        )
+    return issues
+
+
 def validate_resume(
     resume: TailoredResume,
     profile: CandidateProfile,
@@ -266,6 +282,8 @@ def validate_resume(
             review_items.extend(review)
             checked_claims += checked
             supported_claims += supported
+
+    issues.extend(_impact_issues(resume))
 
     for project in resume.projects:
         project_source = find_project(profile, project.name)

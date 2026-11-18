@@ -42,3 +42,44 @@ def test_ui_exposes_portal_and_extension_controls() -> None:
     assert "chrome.action.onClicked" in (root / "extension/background.js").read_text()
     assert "job-assist-prefill-toast" in target
     assert "Never submits forms" in manifest
+
+
+def test_ui_exposes_structured_resume_editor() -> None:
+    root = Path(__file__).parents[1]
+    html = (root / "app/web/index.html").read_text(encoding="utf-8")
+    script = (root / "app/web/static/app.js").read_text(encoding="utf-8")
+    styles = (root / "app/web/static/styles.css").read_text(encoding="utf-8")
+    assert 'id="edit-resume-button"' in html
+    assert 'id="resume-editor"' in html
+    assert "function renderResumeEditor" in script
+    assert "function parseSkillGroups" in script
+    assert 'method: "PUT"' in script
+    assert "/resume`, {" in script
+    assert "Manually edited" in script
+    assert ".resume-editor" in styles
+
+
+def test_progress_steps_mark_done_and_active_states() -> None:
+    root = Path(__file__).parents[1]
+    script = (root / "app/web/static/app.js").read_text(encoding="utf-8")
+    styles = (root / "app/web/static/styles.css").read_text(encoding="utf-8")
+    assert "const stageMaps = {" in script
+    assert "notes: 0," in script
+    assert "scoring: 1," in script
+    assert "suggestions: 2," in script
+    assert 'step.classList.toggle("done", index < active)' in script
+    assert 'step.classList.toggle("active", index === active)' in script
+    assert "@keyframes step-blink" in styles
+    assert "animation: step-blink 1s ease-in-out infinite;" in styles
+    assert ".progress-steps li.done" in styles
+    assert "opacity: 0.5;" in styles
+
+
+def test_saving_notes_auto_revalidates() -> None:
+    root = Path(__file__).parents[1]
+    script = (root / "app/web/static/app.js").read_text(encoding="utf-8")
+    assert "revalidating: false," in script
+    assert "await revalidateNotes();" in script
+    assert "Reanalyzing with your note..." in script
+    assert "if (!state.currentId || state.revalidating) return;" in script
+    assert "stopPolling();\n    poll();" in script

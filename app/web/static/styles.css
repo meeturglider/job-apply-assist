@@ -500,15 +500,29 @@ h3 {
 }
 
 .progress-steps li.done {
-  border-color: rgba(52, 211, 153, 0.3);
-  background: rgba(52, 211, 153, 0.08);
-  color: #86efac;
+  border-color: var(--line-soft);
+  background: transparent;
+  color: var(--faint);
+  opacity: 0.5;
 }
 
 .progress-steps li.active {
   border-color: rgba(96, 165, 250, 0.35);
   background: rgba(96, 165, 250, 0.1);
   color: var(--accent);
+  animation: step-blink 1s ease-in-out infinite;
+}
+
+@keyframes step-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-steps li.active {
+    animation: none;
+  }
 }
 
 .notice {
@@ -989,6 +1003,47 @@ details.evidence[open] summary::before {
 .download-button:hover {
   border-color: rgba(96, 165, 250, 0.5);
   background: rgba(37, 99, 235, 0.12);
+}
+
+.resume-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.resume-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: rgba(8, 14, 26, 0.55);
+}
+
+.resume-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.resume-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.resume-editor textarea {
+  min-height: 76px;
+}
+
+.resume-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .preview-shell {
