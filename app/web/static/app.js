@@ -911,7 +911,8 @@ async function submitAnalysis(event) {
     });
     state.currentId = data.application.id;
     state.mode = "analysis";
-    showProgress("analysis", "Starting analysis...");
+    button.textContent = "Analyzing...";
+    showProgress("analysis", "Analyzing job...");
     poll();
   } catch (error) {
     setFormError(error.message);

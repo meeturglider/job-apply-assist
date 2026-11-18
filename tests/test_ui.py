@@ -33,6 +33,8 @@ def test_ui_exposes_portal_and_extension_controls() -> None:
     assert "updateProfileStatus" in script
     assert '$("resume-file").addEventListener("change"' in script
     assert "Upload a resume before analyzing a job." in script
+    assert 'button.textContent = "Analyzing..."' in script
+    assert 'showProgress("analysis", "Analyzing job...")' in script
     assert "tracker-status" in html
     assert "prefill-form" in html
     assert "X-CSRF-Token" in script
