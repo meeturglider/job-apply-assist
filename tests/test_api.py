@@ -153,6 +153,21 @@ def test_notes_endpoint_validates_and_blocks_generation(tmp_path: Path) -> None:
         assert application["notes_revision"]
         assert application["notes_validated_revision"] == ""
 
+        long_target = "senior technical program management and cloud operations leadership " * 3
+        long_note = client.put(
+            f"{url}/notes",
+            json={
+                "notes": [
+                    {
+                        "target": long_target,
+                        "text": "I led program management and cloud operations across platform teams.",
+                    }
+                ]
+            },
+        )
+        assert long_note.status_code == 200
+        assert long_note.json()["application"]["notes"][0]["target"] == long_target[:120]
+
         assert client.post(f"{url}/generate", json={}).status_code == 409
         assert client.post(f"{url}/revalidate", json={}).status_code == 409
 

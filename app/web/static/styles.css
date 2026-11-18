@@ -1352,3 +1352,29 @@ details.evidence[open] summary::before {
 #mailto-link {
   text-decoration: none;
 }
+
+.resume-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(70vh, 640px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  padding: 22px;
+  box-shadow: var(--shadow);
+}
+
+.resume-dialog::backdrop {
+  background: rgba(3, 8, 18, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.resume-dialog .history-list {
+  margin: 16px 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.resume-dialog .ghost-button {
+  width: 100%;
+}

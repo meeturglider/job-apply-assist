@@ -26,7 +26,7 @@
 
   <section class="auth-card" id="auth-panel" hidden>
     <h2 id="auth-title">Sign in to your private workspace</h2>
-    <p class="muted">Your resume, jobs, and tracker stay in memory for this session only.</p>
+    <p class="muted">Your resume, jobs, and tracker stay private in this account's workspace.</p>
     <form id="auth-form" novalidate>
       <label class="field"><span>Email</span><input id="auth-email" type="email" autocomplete="username" required></label>
       <label class="field"><span>Password</span><input id="auth-password" type="password" autocomplete="current-password" required minlength="8"></label>
@@ -35,6 +35,16 @@
     <button class="link-button" id="auth-mode-toggle" type="button" hidden>New user? Create account</button>
     <div class="form-error" id="auth-error" hidden></div>
   </section>
+
+  <dialog class="resume-dialog" id="resume-dialog">
+    <div class="panel-heading">
+      <h2>Resume your work</h2>
+      <span class="micro">Saved sessions</span>
+    </div>
+    <p class="muted">Pick an application from your history, or start a new session.</p>
+    <div id="resume-history" class="history-list"></div>
+    <button class="ghost-button" id="new-session-button" type="button">Start new session</button>
+  </dialog>
 
   <main class="layout" id="workspace">
     <aside class="sidebar">

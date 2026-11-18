@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.auth import AccountStore
 from app.config import Settings
 from app.jd.contacts import extract_contacts
 from app.main import create_app
 from app.models import AnalysisResult, ContactCandidate, JobDescription
+from app.workspaces import build_account_workspace
 
 
 def _portal_settings(tmp_path: Path, master_text: str, **overrides: object) -> Settings:
@@ -37,7 +40,30 @@ def _register(client: TestClient, email: str) -> dict[str, str]:
     return {"x-csrf-token": str(payload["csrf_token"])}
 
 
-def test_portal_sessions_are_isolated_and_do_not_write_candidate_data(
+def _login(client: TestClient, email: str) -> dict[str, str]:
+    response = client.post(
+        "/api/auth/login",
+        json={"email": email, "password": "long-password"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    return {"x-csrf-token": str(payload["csrf_token"])}
+
+
+def _wait_for_status(
+    client: TestClient, application_id: str, headers: dict[str, str], statuses: set[str]
+) -> str:
+    for _ in range(300):
+        response = client.get(f"/api/applications/{application_id}/status", headers=headers)
+        assert response.status_code == 200
+        status = str(response.json()["application"]["status"])
+        if status in statuses:
+            return status
+        time.sleep(0.02)
+    raise AssertionError(f"status did not reach {sorted(statuses)}")
+
+
+def test_portal_sessions_are_isolated_with_per_account_storage(
     tmp_path: Path, master_text: str
 ) -> None:
     app = create_app(_portal_settings(tmp_path, master_text))
@@ -45,8 +71,12 @@ def test_portal_sessions_are_isolated_and_do_not_write_candidate_data(
         first_headers = _register(first, "first@example.com")
         second_headers = _register(second, "second@example.com")
         assert first_headers != second_headers
-        assert first.get("/api/auth/me").json()["account"]["email"] == "first@example.com"
-        assert second.get("/api/auth/me").json()["account"]["email"] == "second@example.com"
+        first_me = first.get("/api/auth/me").json()
+        second_me = second.get("/api/auth/me").json()
+        assert first_me["account"]["email"] == "first@example.com"
+        assert second_me["account"]["email"] == "second@example.com"
+        assert first_me["session_only"] is False
+        assert second_me["session_only"] is False
 
         uploaded = first.post(
             "/api/profile/resume",
@@ -67,9 +97,16 @@ def test_portal_sessions_are_isolated_and_do_not_write_candidate_data(
         assert second.get(f"/api/applications/{application_id}").status_code == 404
 
         data_dir = tmp_path / "data"
+        first_account = app.state.accounts.authenticate("first@example.com", "long-password")
+        second_account = app.state.accounts.authenticate("second@example.com", "long-password")
+        assert first_account is not None and second_account is not None
+        users_dir = data_dir / "users"
         assert not (data_dir / "applications").exists()
         assert not (data_dir / "profile").exists()
-        assert sorted(item.name for item in data_dir.iterdir()) == ["accounts.db"]
+        assert {item.name for item in users_dir.iterdir()} == {first_account.id, second_account.id}
+        assert (users_dir / first_account.id / "applications").exists()
+        assert (users_dir / first_account.id / "profile" / "resume.md").exists()
+        assert not list((users_dir / second_account.id / "applications").iterdir())
 
 
 def test_portal_profile_status_is_session_scoped_and_analysis_requires_resume(
@@ -190,10 +227,11 @@ def test_portal_outreach_tracker_and_prefill_endpoints(tmp_path: Path, master_te
             )
         ]
         workspace.store.save(record)
+        asyncio.run(workspace.profiles.load())
         workspace._write(
             record.id,
             "profile.json",
-            workspace.profiles.profile.model_dump_json(),
+            workspace.profiles.profile_path.read_text(encoding="utf-8"),
         )
         workspace._write(
             record.id,
@@ -242,3 +280,69 @@ def test_portal_outreach_tracker_and_prefill_endpoints(tmp_path: Path, master_te
         assert prefill.json()["fields"]["email"] == "test@example.com"
         assert prefill.json()["fields"]["skills"] == ["Python", "Kubernetes"]
         assert prefill.json()["resume_markdown"] == "# Tailored resume"
+
+
+def test_portal_workspace_survives_restart(tmp_path: Path, master_text: str) -> None:
+    settings = _portal_settings(tmp_path, master_text)
+    original = create_app(settings)
+    with TestClient(original) as client:
+        headers = _register(client, "durable@example.com")
+        uploaded = client.post(
+            "/api/profile/resume",
+            json={"text": master_text, "filename": "resume.md"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 200
+        analyzed = client.post(
+            "/api/analyze",
+            json={
+                "text": "Python engineer needed with cloud experience. " * 5,
+                "company": "Acme",
+                "role": "Engineer",
+            },
+            headers=headers,
+        )
+        assert analyzed.status_code == 200
+        application_id = str(analyzed.json()["application"]["id"])
+        assert (
+            _wait_for_status(client, application_id, headers, {"analyzed", "error"}) == "analyzed"
+        )
+        generated = client.post(
+            f"/api/applications/{application_id}/generate", json={}, headers=headers
+        )
+        assert generated.status_code == 200
+        assert (
+            _wait_for_status(client, application_id, headers, {"generated", "error"}) == "generated"
+        )
+
+    restarted = create_app(settings)
+    with TestClient(restarted) as client:
+        headers = _login(client, "durable@example.com")
+        history = client.get("/api/applications", headers=headers).json()
+        assert any(item["id"] == application_id for item in history["applications"])
+        detail = client.get(f"/api/applications/{application_id}", headers=headers)
+        assert detail.status_code == 200
+        saved = client.put(
+            f"/api/applications/{application_id}/resume",
+            json=detail.json()["resume"],
+            headers=headers,
+        )
+        assert saved.status_code == 200
+        assert saved.json()["metadata"]["method"] == "manual-edit"
+
+
+def test_portal_restart_marks_interrupted_runs(tmp_path: Path, master_text: str) -> None:
+    settings = _portal_settings(tmp_path, master_text)
+    account = AccountStore(settings.accounts_path).create("interrupt@example.com", "long-password")
+    assert account is not None
+    first = build_account_workspace(settings, account.id)
+    record = first._new_record("Acme", "Platform Engineer", "")
+    record.status = "generating"
+    record.stage = "tailoring"
+    first.store.save(record)
+
+    recovered = build_account_workspace(settings, account.id)
+    updated = recovered.get(record.id)
+    assert updated is not None
+    assert updated.status == "error"
+    assert updated.error == "interrupted"

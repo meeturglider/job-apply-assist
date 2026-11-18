@@ -25,10 +25,17 @@ def test_ui_exposes_portal_and_extension_controls() -> None:
     assert "auth-panel" in html
     assert "auth-form" in html
     assert "auth-mode-toggle" in html
+    assert 'id="resume-dialog"' in html
+    assert "Resume your work" in html
+    assert "Start new session" in html
     assert "New user? Create account" in html
     assert 'id="status-strip"' in html
     assert "setAuthMode" in script
     assert "validateAuth" in script
+    assert "function showResumeDialog" in script
+    assert "function startNewSession" in script
+    assert "function historyButton" in script
+    assert "error.status = response.status" in script
     assert '$("status-strip").hidden = true' in script
     assert "updateProfileStatus" in script
     assert '"Awaiting resume upload"' in script
@@ -40,6 +47,7 @@ def test_ui_exposes_portal_and_extension_controls() -> None:
     assert "tracker-status" in html
     assert "prefill-form" in html
     assert "X-CSRF-Token" in script
+    assert "pruneResumeDrafts" in script
     assert "JOB_ASSIST_PREFILL" in script
     assert "chrome.action.onClicked" in (root / "extension/background.js").read_text()
     assert "job-assist-prefill-toast" in target

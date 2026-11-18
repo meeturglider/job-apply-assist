@@ -11,7 +11,7 @@
 
 # PROFESSIONAL SUMMARY
 
-Senior Cloud Architect with 16+ years of experience in Cloud Architecture, DevOps, Platform Engineering, Infrastructure Automation, Kubernetes, CI/CD, Cloud Security, and AI-driven operational transformation.
+Senior Cloud Architect with 16 years of experience in Cloud Architecture, DevOps, Platform Engineering, Infrastructure Automation, Kubernetes, CI/CD, Cloud Security, and AI-driven operational transformation.
 
 Experienced in designing enterprise-scale cloud-native platforms using GCP, AWS, Kubernetes, Docker, Terraform, Linux automation, and Generative AI technologies including Vertex AI and Gemini Enterprise.
 
@@ -112,7 +112,7 @@ Strong engineering leader with expertise in infrastructure automation, operation
 
 ### Senior Cloud Architect
 
-📅 Jul 2025 – Present | Hyderabad
+📅 Aug 2024 – Present | Hyderabad
 
 ### Digital SME – Proactive Intelligence Workflow
 
@@ -121,6 +121,7 @@ Designed and implemented an AI-driven operational intelligence platform using Ve
 ### Key Contributions
 
 * Built intelligent customer prioritization workflows using escalation trends and customer operational data.
+* Led GCP operations teams across India and Europe.
 * Developed AI-powered automated case review systems for identifying high-risk support cases.
 * Implemented Gemini Enterprise chatbot solutions using curated operational datasets.
 * Designed proactive automation workflows reducing manual troubleshooting effort.
@@ -182,23 +183,7 @@ Designed a real-time AI technical interviewing platform combining conversational
 
 ---
 
-## Cognizant Technology Solutions
-
-### Senior Cloud Manager
-
-📅 Aug 2024 – Jul 2025 | Hyderabad
-
-### Key Contributions
-
-* Led GCP operations teams across India and Europe.
-* Managed operational delivery, escalations, and engineering governance.
-* Led AI transformation initiatives across operational workflows.
-* Completed operational merger involving 200+ resources across Romania and Israel.
-* Improved operational efficiency through automation and workflow standardization.
-
----
-
-## Google Operations Center
+## Google Operations Center ( Alphabet )
 
 ### Technical Lead
 
@@ -206,7 +191,7 @@ Designed a real-time AI technical interviewing platform combining conversational
 
 ### Key Contributions
 
-* Led and mentored 30+ cloud engineers handling complex GCP support operations.
+* Led and mentored 30 cloud engineers handling complex GCP support operations.
 * Guided enterprise customers on cloud security and scalable GCP architecture.
 * Led automation initiatives focused on operational optimization and FTE savings.
 * Managed stakeholder reviews, reporting, and operational governance.

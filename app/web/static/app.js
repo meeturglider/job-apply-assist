@@ -76,6 +76,18 @@ function clearAllResumeDrafts() {
   }
 }
 
+function pruneResumeDrafts(validIds) {
+  const valid = new Set(validIds);
+  try {
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith(RESUME_DRAFT_PREFIX))
+      .filter((key) => !valid.has(key.slice(RESUME_DRAFT_PREFIX.length)))
+      .forEach((key) => localStorage.removeItem(key));
+  } catch (_) {
+    return;
+  }
+}
+
 function persistResumeDraft() {
   const applicationId = state.currentId;
   if (!applicationId || !state.resumeDraft || !state.detail) return;
@@ -132,7 +144,9 @@ async function api(path, options = {}) {
     } catch (_) {
       // Keep the status message.
     }
-    throw new Error(detail);
+    const error = new Error(detail);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
@@ -342,9 +356,25 @@ function profileUrls() {
     .filter(Boolean);
 }
 
-async function refreshHistory() {
+function historyButton(record, onSelect) {
+  const item = el("button", "history-item");
+  item.type = "button";
+  item.classList.toggle("active", record.id === state.currentId);
+  const left = el("div");
+  left.appendChild(el("div", "history-title", record.role || record.company || "Untitled role"));
+  left.appendChild(el("div", "history-sub", `${record.company || "Unknown company"} · ${record.status}`));
+  item.appendChild(left);
+  if (record.score) {
+    item.appendChild(el("div", "history-score", `${Math.round(record.score)}%`));
+  }
+  item.addEventListener("click", () => onSelect(record));
+  return item;
+}
+
+async function refreshHistory(history = null) {
   try {
-    const data = await api("/api/applications");
+    const data = history || (await api("/api/applications"));
+    pruneResumeDrafts(data.applications.map((record) => record.id));
     const list = $("history");
     clear(list);
     if (!data.applications.length) {
@@ -352,18 +382,7 @@ async function refreshHistory() {
       return;
     }
     data.applications.forEach((record) => {
-      const item = el("button", "history-item");
-      item.type = "button";
-      item.classList.toggle("active", record.id === state.currentId);
-      const left = el("div");
-      left.appendChild(el("div", "history-title", record.role || record.company || "Untitled role"));
-      left.appendChild(el("div", "history-sub", `${record.company || "Unknown company"} · ${record.status}`));
-      item.appendChild(left);
-      if (record.score) {
-        item.appendChild(el("div", "history-score", `${Math.round(record.score)}%`));
-      }
-      item.addEventListener("click", () => openApplication(record.id, record.status));
-      list.appendChild(item);
+      list.appendChild(historyButton(record, (item) => openApplication(item.id, item.status)));
     });
   } catch (error) {
     console.error(error);
@@ -384,6 +403,11 @@ async function openApplication(applicationId, status) {
     const detail = await api(`/api/applications/${applicationId}`);
     renderDetail(detail);
   } catch (error) {
+    if (error.status === 404) {
+      clearResumeDraft(applicationId);
+      state.currentId = null;
+      state.detail = null;
+    }
     showNotice(error.message, "error");
   }
   refreshHistory();
@@ -1638,7 +1662,40 @@ function showAuthPanel(message = "") {
   showAuthError(message);
 }
 
-function applySession(data) {
+function startNewSession() {
+  stopPolling();
+  state.currentId = null;
+  state.detail = null;
+  state.resumeDraft = null;
+  state.resumeDraftBase = "";
+  state.lastRestoredDraft = "";
+  $("result").hidden = true;
+  $("progress-card").hidden = true;
+  $("empty-state").hidden = false;
+  hideNotice();
+}
+
+function showResumeDialog(applications) {
+  if (!applications.length) return;
+  const dialog = $("resume-dialog");
+  const list = $("resume-history");
+  clear(list);
+  applications.forEach((record) => {
+    list.appendChild(
+      historyButton(record, (item) => {
+        dialog.close();
+        openApplication(item.id, item.status);
+      }),
+    );
+  });
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
+async function applySession(data) {
   state.csrf = data.csrf_token || "";
   state.accountEmail = data.account?.email || "";
   $("auth-panel").hidden = true;
@@ -1649,8 +1706,15 @@ function applySession(data) {
   email.textContent = state.accountEmail;
   $("logout-button").hidden = !state.accountEmail;
   showAuthError();
+  startNewSession();
   refreshHealth();
-  refreshHistory();
+  try {
+    const history = await api("/api/applications");
+    refreshHistory(history);
+    showResumeDialog(history.applications);
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 async function authenticate() {
@@ -1671,7 +1735,7 @@ async function authenticate() {
       body: JSON.stringify({ email, password }),
     });
     $("auth-password").value = "";
-    applySession(data);
+    await applySession(data);
   } catch (error) {
     showAuthError(error.message);
   } finally {
@@ -1704,7 +1768,7 @@ async function boot() {
   state.allowRegistration = Boolean(config.allow_registration);
   $("reset-resume").hidden = state.portalMode;
   $("clear-resume").hidden = !state.portalMode;
-  $("history-scope").textContent = state.portalMode ? "Session only" : "Local only";
+  $("history-scope").textContent = state.portalMode ? "Your workspace" : "Local only";
   setAuthMode("login");
   if (!state.portalMode) {
     $("status-strip").hidden = false;
@@ -1713,7 +1777,7 @@ async function boot() {
     return;
   }
   try {
-    applySession(await api("/api/auth/me"));
+    await applySession(await api("/api/auth/me"));
   } catch (_) {
     showAuthPanel();
   }
@@ -1743,5 +1807,10 @@ $("auth-mode-toggle").addEventListener("click", () => {
   setAuthMode(state.authMode === "login" ? "register" : "login");
 });
 $("logout-button").addEventListener("click", logout);
+$("new-session-button").addEventListener("click", () => {
+  $("resume-dialog").close();
+  startNewSession();
+  refreshHistory();
+});
 
 boot();

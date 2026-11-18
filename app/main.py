@@ -19,9 +19,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.artifacts import MemoryArtifactStore
 from app.auth import (
     CSRF_HEADER,
+    Account,
     AccountStore,
     SessionManager,
     clear_session_cookies,
@@ -29,10 +29,10 @@ from app.auth import (
 )
 from app.config import Settings, settings
 from app.jd.fetcher import FetchError, validate_url
+from app.llm import OllamaClient
 from app.models import TailoredResume
-from app.profile.memory_service import MemoryProfileService
 from app.service import ApplicationService
-from app.store import MemoryApplicationStore
+from app.workspaces import build_account_workspace
 
 WEB_DIR = Path(__file__).parent / "web"
 STATIC_DIR = WEB_DIR / "static"
@@ -53,7 +53,7 @@ class ResumeUploadRequest(BaseModel):
 
 
 class NoteInput(BaseModel):
-    target: str = Field(min_length=1, max_length=120)
+    target: str = Field(min_length=1, max_length=1000)
     text: str = Field(min_length=10, max_length=2000)
 
 
@@ -230,18 +230,18 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         accounts = None
         sessions = None
 
-    def _new_workspace() -> ApplicationService:
-        return ApplicationService(
-            active_settings,
-            store=MemoryApplicationStore(),
-            profiles=MemoryProfileService(active_settings),
-            artifacts=MemoryArtifactStore(),
-        )
+    service = None if portal_mode else ApplicationService(active_settings)
+    workspaces: dict[str, ApplicationService] = {}
 
-    service = _new_workspace() if portal_mode else ApplicationService(active_settings)
+    def _account_workspace(account: Account) -> ApplicationService:
+        workspace = workspaces.get(account.id)
+        if workspace is None:
+            workspace = build_account_workspace(active_settings, account.id)
+            workspaces[account.id] = workspace
+        return workspace
 
     def _workspace(request: Request) -> ApplicationService:
-        if not portal_mode or sessions is None:
+        if service is not None:
             return service
         session = getattr(request.state, "session", None)
         if session is None or session.workspace is None:
@@ -261,12 +261,10 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
-            await service.shutdown()
-            if sessions is not None:
-                for session in sessions.all():
-                    workspace = session.workspace
-                    if workspace is not None:
-                        await workspace.shutdown()
+            if service is not None:
+                await service.shutdown()
+            for workspace in workspaces.values():
+                await workspace.shutdown()
 
     app = FastAPI(
         title="Job Apply Assist",
@@ -474,7 +472,7 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
                 status_code=409,
                 detail="Use a valid email and a password of at least 8 characters.",
             )
-        session = sessions.create(account, _new_workspace())
+        session = sessions.create(account, _account_workspace(account))
         set_session_cookies(
             response,
             session,
@@ -484,7 +482,7 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         return {
             "account": {"email": account.email},
             "csrf_token": session.csrf_token,
-            "session_only": True,
+            "session_only": False,
         }
 
     @app.post("/api/auth/login")
@@ -494,7 +492,7 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         account = accounts.authenticate(payload.email, payload.password)
         if account is None:
             raise HTTPException(status_code=401, detail="Invalid email or password.")
-        session = sessions.create(account, _new_workspace())
+        session = sessions.create(account, _account_workspace(account))
         set_session_cookies(
             response,
             session,
@@ -504,7 +502,7 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         return {
             "account": {"email": account.email},
             "csrf_token": session.csrf_token,
-            "session_only": True,
+            "session_only": False,
         }
 
     @app.post("/api/auth/logout")
@@ -525,19 +523,19 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="Sign in to continue.")
         return {
             "account": {"email": session.email},
-            "session_only": True,
+            "session_only": False,
             "csrf_token": session.csrf_token,
         }
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:
-        llm_available = await service.llm.available()
+        llm = service.llm if service is not None else OllamaClient(active_settings)
         return {
             "ok": True,
             "llm_provider": active_settings.llm_provider,
             "llm_model": active_settings.ollama_model,
-            "llm_available": llm_available,
-            "profile": service.profiles.status(),
+            "llm_available": await llm.available(),
+            "profile": service.profiles.status() if service is not None else {},
         }
 
     @app.get("/api/profile/status")

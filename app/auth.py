@@ -149,15 +149,7 @@ class SessionManager:
         return session
 
     def delete(self, session_id: str) -> None:
-        session = self._sessions.pop(session_id, None)
-        if session is not None and session.workspace is not None:
-            shutdown = getattr(session.workspace, "shutdown", None)
-            if callable(shutdown):
-                result = shutdown()
-                if hasattr(result, "__await__"):
-                    import asyncio
-
-                    asyncio.create_task(result)
+        self._sessions.pop(session_id, None)
 
     def all(self) -> list[Session]:
         self.prune()

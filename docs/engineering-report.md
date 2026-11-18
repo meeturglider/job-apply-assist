@@ -220,12 +220,16 @@ evidence by the same claim validator used for the canonical resume.
 
 ## Private Apply Portal
 
-`PORTAL_MODE=true` enables real accounts with session-only candidate data. `AccountStore`
-uses PBKDF2-SHA256 password hashes in a private SQLite database. `SessionManager` keeps
-sessions in memory, prunes expired entries, and creates a fresh service workspace per login.
-Session and CSRF cookies are `HttpOnly`/`SameSite=Lax` as appropriate, and every unsafe API
+`PORTAL_MODE=true` enables real accounts with durable per-account candidate data. `AccountStore`
+uses PBKDF2-SHA256 password hashes in a private SQLite database. `SessionManager` keeps login
+sessions in memory and prunes expired entries; each login loads the account's workspace from
+`data/users/<account_id>/` with its own application store, profile service, and artifacts.
+Restart recovery marks interrupted runs as errors so they can be started again. Session and
+CSRF cookies are `HttpOnly`/`SameSite=Lax` as appropriate, and every unsafe API
 method requires the CSRF header to match the session token. Rate-limit keys become
 `user:<id>` for signed-in sessions and `ip:<address>` for unauthenticated portal requests.
+After sign-in the UI shows saved applications for selection or offers a new session; clearing
+stale browser drafts prevents an old application ID from being used after restart.
 
 `app/jd/contacts.py` extracts public recruiter candidates from JSON-LD `applicationContact`,
 `mailto:` links, and page text. It does not authenticate to LinkedIn or scrape private pages.
@@ -293,7 +297,8 @@ verification, award merge/deduplication, resume upload/reset, per-analysis profi
 merging, parent-company entity matching, grounded semantic keyword suggestions, LLM
 suggestion rejection/fallback behavior, shared-password gating, per-client rate limiting,
 proxy-aware rate-limit keys, an end-to-end deterministic analyze/generate flow, portal
-registration/login, session isolation, CSRF enforcement, session-only storage, session-scoped
+registration/login, session isolation, CSRF enforcement, durable per-account storage,
+restart persistence, interrupted-run recovery, session-scoped
 profile status, resume-before-analysis gating, contact extraction, outreach drafting, tracker
 updates, prefill payloads, portal UI/extension controls, Google-style prompt constraints,
 unquantified-impact warnings, manual batched evidence-note reanalysis, optional GLiNER candidate
@@ -336,7 +341,8 @@ Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio
 - SSRF defenses block the common classes of private-network access; they are not a complete
   network security boundary.
 - Local mode has one optional shared password, not per-user accounts; portal mode has accounts
-  but intentionally keeps all candidate work in memory and clears it on logout or restart.
+  with private on-disk workspaces under `data/users/`, so removing that directory permanently
+  deletes the associated candidate data.
 - PDF verification depends on Playwright Chromium; absent browser support is reported as an
   ATS failure rather than silently passing.
 - Keyword coverage is requirement-oriented and does not model every ATS vendor's scoring.

@@ -66,10 +66,11 @@ per-user sign-in, use portal mode below instead of `SHARED_PASSWORD`.
 ### Private apply portal
 
 Set `PORTAL_MODE=true` and restart the server. Accounts are stored as email/password hashes
-in `data/accounts.db`; candidate data is not. Session cookies identify the user and carry a
-CSRF token for all unsafe API calls. Each sign-in creates a fresh in-memory workspace with
-its own application store, profile service, and generated artifacts. Signing out, expiring the
-session, or restarting the server clears that workspace.
+in `data/accounts.db`; candidate data is stored separately under `data/users/<account_id>/`.
+Session cookies identify the user and carry a CSRF token for all unsafe API calls. Signing in
+loads that account's durable application store, profile service, and generated artifacts, so
+a server restart does not lose work. Signing out or expiring the session only ends the login;
+the saved history remains and the UI asks whether to resume a prior application or start new.
 
 The portal UI adds:
 
@@ -200,7 +201,7 @@ See `.env.example`. Key settings:
 | `SHARED_PASSWORD` | empty | Enables Basic auth when set; any username works. |
 | `RATE_LIMIT_PER_MINUTE` | `30` | Caps POST API requests per client per minute; `0` disables. |
 | `TRUST_PROXY_HEADERS` | `false` | Uses `CF-Connecting-IP`/`X-Forwarded-For` for rate-limit buckets. |
-| `PORTAL_MODE` | `false` | Enables per-user sessions with in-memory candidate data. |
+| `PORTAL_MODE` | `false` | Enables per-user sessions with durable per-account candidate data. |
 | `ALLOW_REGISTRATION` | `true` | Allows new portal accounts. |
 | `SESSION_TTL_MINUTES` | `480` | Lifetime of a portal session. |
 | `SESSION_COOKIE_SECURE` | `false` | Marks session cookies `Secure`; enable for HTTPS tunnel URLs. |
@@ -226,7 +227,7 @@ Included:
 - JD URL fetch with manual-paste fallback
 - Local LLM + deterministic analysis and tailoring
 - Profile merge across resume, portfolio JSON, and JSON-LD
-- Per-session resume upload and per-analysis profile URLs
+- Per-account resume upload and per-analysis profile URLs
 - Match scoring with evidence and source provenance
 - Evidence-grounded semantic profile-edit suggestions
 - Evidence notes with accepted/rejected decisions and revalidation gate
@@ -234,7 +235,7 @@ Included:
 - PDF, DOCX, HTML, and Markdown exports
 - Truthfulness validation and sanitization
 - ATS checks and application history
-- Optional per-user portal with session-only trackers and artifacts
+- Optional per-user portal with durable history, trackers, and artifacts
 - Public contact discovery, outreach drafts, and reviewed form prefill
 
 Not included:

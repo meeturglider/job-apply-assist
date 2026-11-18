@@ -112,6 +112,24 @@ async def test_manual_resume_edits_are_validated_and_regenerated(
         await service.shutdown()
 
 
+@pytest.mark.asyncio
+async def test_resume_edits_report_missing_artifacts(tmp_path: Path, master_text: str) -> None:
+    service = ApplicationService(_settings(tmp_path, master_text))
+    try:
+        record = service.start_analysis(text=JD, company="Acme", role="Platform Engineer")
+        assert await _wait(service, record.id, {"analyzed"}) == "analyzed"
+        service.start_generation(record.id)
+        assert await _wait(service, record.id, {"generated"}) == "generated"
+
+        payload = service.analysis_payload(record.id)
+        resume = TailoredResume.model_validate(payload["resume"])
+        service.artifacts.delete(record.id, "analysis.json")
+        with pytest.raises(ValueError, match="artifacts are missing"):
+            await service.update_resume(record.id, resume)
+    finally:
+        await service.shutdown()
+
+
 def test_notes_are_grounded_and_application_local(master_text: str) -> None:
     profile = parse_master_resume_text(master_text, source="latest.md")
     accepted, decisions = apply_notes(

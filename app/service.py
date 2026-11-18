@@ -155,6 +155,17 @@ class ApplicationService:
 
         task.add_done_callback(done)
 
+    def recover_interrupted(self) -> None:
+        for record in self.store.list(limit=1000):
+            if record.status in {"queued", "analyzing", "generating"}:
+                self._update(
+                    record,
+                    status="error",
+                    stage="error",
+                    message="The run was interrupted by a server restart. Start it again.",
+                    error="interrupted",
+                )
+
     async def shutdown(self) -> None:
         tasks = [task for task in self._tasks if not task.done()]
         for task in tasks:
@@ -673,21 +684,26 @@ class ApplicationService:
             raise ValueError("Application not found.")
         if record.status != "generated":
             raise ValueError("Generate a resume before editing it.")
-        job = JobDescription.model_validate_json(self._read_text(application_id, "job.json"))
-        profile = self._read_profile(application_id)
-        resume.experience = merge_experience_entries(resume.experience, bullet_limit=False)
-        validation = validate_resume(resume, profile, job)
-        errors = [issue.message for issue in validation.issues if issue.severity == "error"]
-        if errors:
-            raise ValueError(errors[0])
-        logger.info("resume_edits_applied", extra={"application_id": application_id})
-        await self._render_resume(
-            application_id,
-            resume=resume,
-            validation=validation,
-            method="manual-edit",
-            error="Resume edits applied. Preview and downloads were refreshed.",
-        )
+        try:
+            job = JobDescription.model_validate_json(self._read_text(application_id, "job.json"))
+            profile = self._read_profile(application_id)
+            resume.experience = merge_experience_entries(resume.experience, bullet_limit=False)
+            validation = validate_resume(resume, profile, job)
+            errors = [issue.message for issue in validation.issues if issue.severity == "error"]
+            if errors:
+                raise ValueError(errors[0])
+            logger.info("resume_edits_applied", extra={"application_id": application_id})
+            await self._render_resume(
+                application_id,
+                resume=resume,
+                validation=validation,
+                method="manual-edit",
+                error="Resume edits applied. Preview and downloads were refreshed.",
+            )
+        except FileNotFoundError as exc:
+            raise ValueError(
+                "Application artifacts are missing. Regenerate the resume before editing."
+            ) from exc
         return self.analysis_payload(application_id)
 
     def _artifact(self, application_id: str, kind: str, filename: str) -> ArtifactInfo:
