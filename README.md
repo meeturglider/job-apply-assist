@@ -22,7 +22,8 @@ resumes, jobs, notes, drafts, or tracker state.
 Requirements:
 
 - Python 3.11+
-- Ollama (optional but recommended for higher-quality tailoring)
+- Ollama (optional but recommended for higher-quality reasoning and tailoring)
+- GLiNER small (optional, for fast local JD skill extraction)
 - Chromium for PDF output (installed once through Playwright)
 
 ```bash
@@ -30,6 +31,11 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 playwright install chromium
+
+# Optional: enable the fast local NER stage
+pip install -e '.[nlp]'
+job-assist warm-ner
+# then set NLP_PROVIDER=gliner in .env
 
 # Optional: start Ollama and pull a model
 ollama serve
@@ -41,8 +47,9 @@ uvicorn app.main:app --host 127.0.0.1 --port 8765
 
 Open `http://127.0.0.1:8765`.
 
-Local LLM extraction and tailoring can take 1-4 minutes per run on an 8B model. The UI
-runs these as background jobs and polls for progress, so the page stays responsive.
+Rules and GLiNER produce JD skill candidates in seconds on CPU. The 8B model reviews only
+those candidate IDs and can still take 1-4 minutes per run; the UI runs each stage as a
+background job and polls for progress, so the page stays responsive.
 
 ### Sharing a demo URL
 
@@ -114,8 +121,10 @@ files; only `data/accounts.db` persists.
 
 1. Fetch or accept a job description. LinkedIn and auth-walled pages fall back to
    manual paste.
-2. Extract requirements with the local LLM, falling back to deterministic extraction.
-3. Normalize skills through the alias lexicon in `app/data/skills.yaml`.
+2. Extract candidate skills and requirements with rules and optional GLiNER NER, then let
+   Ollama review only those candidate IDs instead of re-extracting the full JD.
+3. Normalize skills through the alias lexicon in `app/data/skills.yaml` and reject any model
+   output that is not backed by a supplied candidate.
 4. Match requirements against resume bullets, projects, certifications, and portfolio
    evidence.
 5. Score must-have/nice-to-have coverage, responsibilities, certifications, seniority,
@@ -171,10 +180,17 @@ See `.env.example`. Key settings:
 | --- | --- | --- |
 | `LLM_PROVIDER` | `ollama` | Set to `none` for deterministic-only mode. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama endpoint. |
-| `OLLAMA_MODEL` | `qwen3:8b` | Model used for extraction and tailoring. |
+| `OLLAMA_MODEL` | `qwen3:8b` | Model used for candidate review, suggestions, and tailoring. |
 | `OLLAMA_TIMEOUT_SECONDS` | `300` | Per-request timeout. |
 | `OLLAMA_MAX_RETRIES` | `1` | Retries for malformed or failed LLM JSON responses. |
 | `OLLAMA_RETRY_BACKOFF_SECONDS` | `1` | Base backoff between LLM retries. |
+| `NLP_PROVIDER` | `none` | Set to `gliner` after installing `.[nlp]`. |
+| `NLP_MODEL` | `gliner-community/gliner_small-v2.5` | Hugging Face model used by GLiNER. |
+| `NLP_MODEL_PATH` | empty | Local model directory for offline use; overrides `NLP_MODEL`. |
+| `NLP_MAX_CHARS` | `24000` | Maximum JD text sent through the NER stage. |
+| `NLP_CHUNK_CHARS` | `4000` | NER chunk size. |
+| `NLP_CANDIDATE_LIMIT` | `80` | Maximum candidates passed to the review model. |
+| `NLP_THRESHOLD` | `0.4` | GLiNER entity confidence threshold. |
 | `MASTER_RESUME_PATH` | `MASTER_RESUME.md` | Canonical resume source. |
 | `LOG_LEVEL` | `INFO` | Application log level. |
 | `SHARED_PASSWORD` | empty | Enables Basic auth when set; any username works. |

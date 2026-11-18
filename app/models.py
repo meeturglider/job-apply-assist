@@ -232,6 +232,8 @@ class JobDescription(BaseModel):
     source_url: str = ""
     fetched_at: datetime = Field(default_factory=utc_now)
     extraction_method: str = "heuristic"
+    extraction_stages: list[str] = Field(default_factory=list)
+    ner_candidate_count: int = 0
     extraction_fallback_reason: str = ""
     llm_attempts: int = 0
     warnings: list[str] = Field(default_factory=list)
@@ -511,9 +513,10 @@ class ApplicationRecord(BaseModel):
         return {
             "queued": 5,
             "fetching": 15,
-            "matching": 40,
+            "extracting": 40,
+            "reviewing": 55,
+            "matching": 65,
             "notes": 60,
-            "extracting": 70,
             "scoring": 85,
             "suggestions": 95,
             "analyzing": 70,

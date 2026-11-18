@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     ollama_max_retries: int = Field(default=1, ge=0, le=3)
     ollama_retry_backoff_seconds: float = Field(default=1.0, ge=0, le=10)
 
+    nlp_provider: str = "none"
+    nlp_model: str = "gliner-community/gliner_small-v2.5"
+    nlp_model_path: str = ""
+    nlp_max_chars: int = Field(default=24000, ge=1000, le=100000)
+    nlp_chunk_chars: int = Field(default=4000, ge=1000, le=12000)
+    nlp_candidate_limit: int = Field(default=80, ge=10, le=300)
+    nlp_threshold: float = Field(default=0.4, ge=0, le=1)
+
     master_resume_path: Path = Path("MASTER_RESUME.md")
     portfolio_base_url: str = "https://hari.is-a.dev"
     portfolio_cache_seconds: int = 3600

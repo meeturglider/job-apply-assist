@@ -97,7 +97,13 @@ function showProgress(mode, message = "Working...") {
       ? ["Load analysis", "Build tailored resume", "Truthfulness check", "Render files"]
       : mode === "revalidation"
         ? ["Apply notes", "Score evidence", "Refresh suggestions", "Finish"]
-        : ["Fetch job description", "Extract requirements", "Load profile", "Match evidence and score"];
+        : [
+            "Fetch job description",
+            "Extract candidates",
+            "Review with local model",
+            "Load profile and match",
+            "Finish",
+          ];
   labels.forEach((label) => steps.appendChild(el("li", "", label)));
 }
 
@@ -113,11 +119,12 @@ function setProgress(record) {
       fetching: 0,
       manual_paste: 0,
       extracting: 1,
-      matching: 2,
+      reviewing: 2,
+      matching: 3,
       scoring: 3,
-      suggestions: 3,
-      analyzing: 3,
-      done: 3,
+      suggestions: 4,
+      analyzing: 4,
+      done: 4,
       error: 0,
     },
     generation: {

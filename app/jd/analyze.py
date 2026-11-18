@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from app.config import Settings
+from app.jd.ner import SKILL_LABELS, GlinerExtractor, NerCandidate
 from app.llm import OllamaClient
-from app.llm_schemas import LLMJobExtraction
+from app.llm_schemas import LLMJobExtraction, LLMJobReview
 from app.matching.dimensions import classify_dimension
 from app.models import JobDescription, Requirement
 from app.prompts import load_prompt
@@ -117,6 +120,48 @@ STOPWORDS = {
     "benefits",
     "company",
 }
+
+
+ROLE_FAMILIES = {
+    "cloud_architect",
+    "platform_engineer",
+    "devops",
+    "sre",
+    "ai_infra",
+    "engineering_manager",
+    "cloud_operations",
+    "other",
+}
+SENIORITY_VALUES = {
+    "director",
+    "principal",
+    "staff",
+    "manager",
+    "senior",
+    "lead",
+    "mid",
+    "junior",
+}
+
+
+@dataclass
+class JobDraft:
+    text: str
+    title: str
+    company: str
+    location: str
+    source_url: str
+    must: list[Requirement]
+    nice: list[Requirement]
+    certifications: list[Requirement]
+    education: list[Requirement]
+    experience: list[Requirement]
+    responsibilities: list[str]
+    keywords: dict[str, float]
+    candidates: list[NerCandidate]
+    hints: dict[str, list[str]] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    method: str = "rules"
 
 
 def _role_family(title: str, text: str) -> str:
@@ -401,6 +446,364 @@ def _heuristic_summary(title: str, must: list[Requirement], text: str) -> str:
     if title and top:
         return f"{title} role focused on {top}. {first_sentences}"[:700]
     return first_sentences[:700]
+
+
+def _rule_candidate(requirement: Requirement, source: str, label: str) -> NerCandidate:
+    canonical = (
+        lexicon.canonicalize(requirement.skill) if label in SKILL_LABELS else requirement.skill
+    )
+    identifier = lexicon.normalize(canonical) or str(abs(hash(requirement.skill)))
+    return NerCandidate(
+        id=f"{source}:{identifier}",
+        text=requirement.skill,
+        canonical=canonical,
+        label=label,
+        start=0,
+        end=0,
+        score=round(min(1.0, max(0.2, requirement.weight / 2)), 2),
+        source=source,
+        context=requirement.context,
+    )
+
+
+def _unreviewed_requirements(
+    requirements: list[Requirement], reviewed_ids: set[str], source: str, label: str
+) -> list[Requirement]:
+    return [
+        requirement
+        for requirement in requirements
+        if _rule_candidate(requirement, source, label).id not in reviewed_ids
+    ]
+
+
+def extract_job_candidates(
+    text: str,
+    settings: Settings,
+    *,
+    title: str = "",
+    company: str = "",
+    location: str = "",
+    source_url: str = "",
+) -> JobDraft:
+    text = text.strip()
+    if not text:
+        raise ValueError("Job description text is empty.")
+
+    heuristic_must, heuristic_nice, keywords = heuristic_requirements(text)
+    certifications = _detect_certifications(text)
+    education = _detect_education_requirements(text)
+    experience = _detect_experience_requirements(text)
+    responsibilities = _extract_responsibilities(text)
+    warnings: list[str] = []
+    candidate_map: dict[str, NerCandidate] = {}
+
+    def add_rule(requirement: Requirement, source: str, label: str) -> None:
+        candidate = _rule_candidate(requirement, source, label)
+        candidate_map.setdefault(candidate.id, candidate)
+
+    for requirement in [*heuristic_must, *heuristic_nice]:
+        add_rule(requirement, "rule", "technical skill")
+    for requirement in certifications:
+        add_rule(requirement, "rule:cert", "certification")
+    for requirement in education:
+        add_rule(requirement, "rule:edu", "degree")
+    for requirement in experience:
+        add_rule(requirement, "rule:exp", "years of experience")
+    for index, responsibility in enumerate(responsibilities[:12]):
+        add_rule(
+            Requirement(skill=responsibility, category="Responsibility"),
+            f"rule:resp:{index}",
+            "responsibility",
+        )
+
+    extractor = GlinerExtractor.from_settings(settings)
+    fast = extractor.extract(text)
+    warnings.extend(fast.warnings)
+    known_skills = {
+        lexicon.normalize(candidate.canonical)
+        for candidate in candidate_map.values()
+        if candidate.label in SKILL_LABELS
+    }
+    for candidate in fast.candidates:
+        if candidate.label in SKILL_LABELS:
+            normalized = lexicon.normalize(candidate.canonical)
+            if normalized in known_skills:
+                continue
+            known_skills.add(normalized)
+            keywords.setdefault(candidate.canonical, max(1.0, candidate.score))
+        candidate_map.setdefault(candidate.id, candidate)
+
+    method = "gliner" if extractor.enabled and not fast.warnings else "rules"
+    return JobDraft(
+        text=text,
+        title=title,
+        company=company,
+        location=location,
+        source_url=source_url,
+        must=heuristic_must,
+        nice=heuristic_nice,
+        certifications=certifications,
+        education=education,
+        experience=experience,
+        responsibilities=responsibilities,
+        keywords=dict(keywords),
+        candidates=list(candidate_map.values()),
+        hints=fast.hints,
+        warnings=warnings,
+        method=method,
+    )
+
+
+def _candidate_requirement(candidate: NerCandidate, importance: str = "must_have") -> Requirement:
+    label = candidate.label.casefold()
+    if label == "certification":
+        category, dimension, weight = "Certification", "certification", 1.0
+    elif label == "degree":
+        category, dimension, weight = "Education", "education", 1.5
+    elif label == "years of experience":
+        category, dimension, weight = "Experience", "experience", 1.5
+    elif label == "responsibility":
+        category = "Responsibility"
+        dimension = classify_dimension(candidate.canonical, category)
+        weight = 1.0
+    else:
+        category = lexicon.category_for(candidate.canonical)
+        dimension = classify_dimension(candidate.canonical, category)
+        weight = 1.0 + min(candidate.score, 1.0) * 0.5 + max(candidate.mentions - 1, 0) * 0.1
+        if importance == "must_have":
+            weight += 0.25
+    return Requirement(
+        skill=candidate.canonical,
+        category=category,
+        importance="must_have" if importance == "must_have" else "nice_to_have",
+        weight=round(max(0.5, min(weight, 2.0)), 2),
+        context=candidate.context,
+        dimension=dimension,
+    )
+
+
+def _review_prompt(draft: JobDraft) -> str:
+    title_hints = [draft.title, *draft.hints.get("title", [])]
+    company_hints = [draft.company, *draft.hints.get("company", [])]
+    location_hints = [draft.location, *draft.hints.get("location", [])]
+    lines = [
+        f"Known title hints: {', '.join(value for value in title_hints if value) or 'none'}",
+        f"Known company hints: {', '.join(value for value in company_hints if value) or 'none'}",
+        f"Known location hints: {', '.join(value for value in location_hints if value) or 'none'}",
+        "",
+        "CANDIDATES:",
+    ]
+    for candidate in draft.candidates:
+        lines.append(
+            f"- {candidate.id} | label={candidate.label} | text={candidate.text} | "
+            f"canonical={candidate.canonical} | mentions={candidate.mentions} | "
+            f"score={candidate.score:.2f} | context={candidate.context[:180]}"
+        )
+    lines.append("")
+    lines.append("Choose only IDs from CANDIDATES. Do not invent new values.")
+    return "\n".join(lines)
+
+
+def _pick_review_value(value: object, allowed: list[str]) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    keys = {entry.casefold() for entry in allowed if entry}
+    return text if text.casefold() in keys else ""
+
+
+async def finalize_job_candidates(draft: JobDraft, llm: OllamaClient) -> JobDescription:
+    review_data: dict[str, Any] = {}
+    warnings = list(draft.warnings)
+    fallback_reason = ""
+    llm_attempts = 0
+    if llm.enabled:
+        try:
+            review_data = await llm.json(
+                load_prompt("jd_review.md"),
+                _review_prompt(draft),
+                schema=LLMJobReview,
+                operation="jd_review",
+            )
+            llm_attempts = getattr(llm, "last_attempts", 1)
+        except Exception as exc:
+            fallback_reason = str(exc)
+            llm_attempts = getattr(exc, "attempts", 0)
+            warnings.append(f"LLM review failed; using extracted candidates. {exc}")
+
+    by_id = {candidate.id: candidate for candidate in draft.candidates}
+    used: set[str] = set()
+
+    def picked(key: str) -> list[NerCandidate]:
+        values = review_data.get(key)
+        if not isinstance(values, list):
+            return []
+        result: list[NerCandidate] = []
+        for value in values:
+            identifier = str(value).strip()
+            candidate = by_id.get(identifier)
+            if candidate is None or identifier in used:
+                continue
+            used.add(identifier)
+            result.append(candidate)
+        return result
+
+    picked_must = picked("must_have_ids")
+    picked_nice = picked("nice_to_have_ids")
+    picked_accepted = picked("accepted_ids")
+    picked_certifications = picked("certification_ids")
+    picked_education = picked("education_ids")
+    picked_experience = picked("experience_ids")
+    picked_responsibilities = picked("responsibility_ids")
+    reviewed_ids = {
+        candidate.id
+        for group in (
+            picked_must,
+            picked_nice,
+            picked_accepted,
+            picked_certifications,
+            picked_education,
+            picked_experience,
+            picked_responsibilities,
+        )
+        for candidate in group
+    }
+
+    must = [_candidate_requirement(candidate) for candidate in picked_must]
+    nice = [_candidate_requirement(candidate, "nice_to_have") for candidate in picked_nice]
+    must.extend(_candidate_requirement(candidate) for candidate in picked_accepted)
+    certifications = [
+        _candidate_requirement(candidate, "nice_to_have") for candidate in picked_certifications
+    ]
+    education = [_candidate_requirement(candidate) for candidate in picked_education]
+    experience = [_candidate_requirement(candidate) for candidate in picked_experience]
+
+    must = _merge_requirements(
+        must,
+        _unreviewed_requirements(draft.must, reviewed_ids, "rule", "technical skill"),
+    )
+    nice = _merge_requirements(
+        nice,
+        _unreviewed_requirements(draft.nice, reviewed_ids, "rule", "technical skill"),
+    )
+    certifications = _merge_requirements(
+        certifications,
+        _unreviewed_requirements(draft.certifications, reviewed_ids, "rule:cert", "certification"),
+    )
+    education = _merge_requirements(
+        education,
+        _unreviewed_requirements(draft.education, reviewed_ids, "rule:edu", "degree"),
+    )
+    experience = _merge_requirements(
+        experience,
+        _unreviewed_requirements(draft.experience, reviewed_ids, "rule:exp", "years of experience"),
+    )
+
+    must = [
+        item
+        for item in must
+        if not _is_education_requirement(item.skill) and not _is_experience_requirement(item.skill)
+    ]
+    nice = [
+        item
+        for item in nice
+        if not _is_education_requirement(item.skill) and not _is_experience_requirement(item.skill)
+    ]
+    if not must:
+        must = list(draft.must)
+        warnings.append("No must-have requirements were detected; review the JD manually.")
+
+    for requirement in education:
+        requirement.category = "Education"
+    for requirement in experience:
+        requirement.category = "Experience"
+
+    responsibilities = [candidate.text for candidate in picked_responsibilities]
+    if not responsibilities:
+        responsibilities = list(draft.responsibilities[:12])
+    responsibility_requirements = [
+        Requirement(
+            skill=item,
+            category="Responsibility",
+            importance="must_have",
+            weight=1.0,
+            context="Derived from the job responsibilities.",
+            dimension=classify_dimension(item),
+        )
+        for item in responsibilities[:12]
+        if item.strip()
+    ]
+
+    keywords = dict(draft.keywords)
+    for candidate in draft.candidates:
+        if candidate.label in SKILL_LABELS:
+            keywords.setdefault(candidate.canonical, max(1.0, candidate.score))
+    for requirement in [*must, *nice]:
+        keywords.setdefault(requirement.skill, max(1.0, requirement.weight))
+
+    title_hints = [draft.title, *draft.hints.get("title", [])]
+    company_hints = [draft.company, *draft.hints.get("company", [])]
+    location_hints = [draft.location, *draft.hints.get("location", [])]
+    resolved_title = (
+        _pick_review_value(review_data.get("title"), title_hints)
+        or draft.title
+        or next((value for value in title_hints if value), "Target role")
+    )
+    resolved_company = (
+        _pick_review_value(review_data.get("company"), company_hints)
+        or draft.company
+        or next((value for value in company_hints if value), "")
+    )
+    resolved_location = (
+        _pick_review_value(review_data.get("location"), location_hints)
+        or draft.location
+        or next((value for value in location_hints if value), "")
+    )
+    suggested_role_family = str(review_data.get("role_family") or "").strip()
+    role_family = (
+        suggested_role_family
+        if suggested_role_family in ROLE_FAMILIES
+        else _role_family(resolved_title, draft.text)
+    )
+    suggested_seniority = str(review_data.get("seniority") or "").strip()
+    seniority = (
+        suggested_seniority
+        if suggested_seniority in SENIORITY_VALUES
+        else _seniority(resolved_title, draft.text)
+    )
+    summary = str(review_data.get("summary") or "").strip()
+    if not summary or len(summary) > 700:
+        summary = _heuristic_summary(resolved_title, must, draft.text)
+
+    stages = draft.method.split("+")
+    if review_data and "llm-review" not in stages:
+        stages.append("llm-review")
+
+    return JobDescription(
+        title=resolved_title,
+        company=resolved_company,
+        location=resolved_location,
+        seniority=seniority,
+        role_family=role_family,
+        summary=summary,
+        must_have=must,
+        nice_to_have=nice,
+        education_requirements=education,
+        experience_requirements=experience,
+        responsibility_requirements=responsibility_requirements,
+        responsibilities=responsibilities[:12],
+        certifications=certifications,
+        keywords=dict(sorted(keywords.items(), key=lambda item: -item[1])[:40]),
+        raw_text=draft.text,
+        source_url=draft.source_url,
+        fetched_at=datetime.now(UTC),
+        extraction_method="+".join(stages),
+        extraction_stages=stages,
+        ner_candidate_count=len(draft.candidates),
+        extraction_fallback_reason=fallback_reason,
+        llm_attempts=llm_attempts,
+        warnings=warnings,
+    )
 
 
 async def analyze_job(

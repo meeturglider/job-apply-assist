@@ -31,6 +31,24 @@ class LLMJobExtraction(BaseModel):
     keywords: dict[str, float] = Field(default_factory=dict)
 
 
+class LLMJobReview(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    title: str = ""
+    company: str = ""
+    location: str = ""
+    seniority: str = ""
+    role_family: str = ""
+    summary: str = ""
+    must_have_ids: list[str] = Field(default_factory=list)
+    nice_to_have_ids: list[str] = Field(default_factory=list)
+    accepted_ids: list[str] = Field(default_factory=list)
+    education_ids: list[str] = Field(default_factory=list)
+    experience_ids: list[str] = Field(default_factory=list)
+    certification_ids: list[str] = Field(default_factory=list)
+    responsibility_ids: list[str] = Field(default_factory=list)
+
+
 class LLMProfileSuggestion(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

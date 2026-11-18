@@ -65,9 +65,13 @@ def test_ui_exposes_structured_resume_editor() -> None:
 
 def test_progress_steps_mark_done_and_active_states() -> None:
     root = Path(__file__).parents[1]
+    html = (root / "app/web/index.html").read_text(encoding="utf-8")
     script = (root / "app/web/static/app.js").read_text(encoding="utf-8")
     styles = (root / "app/web/static/styles.css").read_text(encoding="utf-8")
     assert "const stageMaps = {" in script
+    assert "extracting: 1," in script
+    assert "reviewing: 2," in script
+    assert ">Review with local model</li>" in html
     assert "notes: 0," in script
     assert "scoring: 1," in script
     assert "suggestions: 2," in script

@@ -41,7 +41,16 @@ introduced. New model fields are additive with safe defaults.
 job URL or pasted text
         |
         v
-JD fetch and extraction  ->  deterministic fallback when fetch/LLM fails
+JD fetch and extraction
+        |
+        v
+rules + optional GLiNER-small candidate extraction (seconds, local CPU)
+        |
+        v
+Ollama 8B candidate review (IDs only, no free-form skill invention)
+        |
+        v
+deterministic validation, canonicalization, merge, and fallback
         |
         v
 requirement matching by dimension and evidence class
@@ -154,7 +163,10 @@ merged from the master resume and portfolio are deduplicated before display.
 
 ## LLM Reliability
 
-`app/llm_schemas.py` defines narrow Pydantic schemas for JD extraction and resume tailoring.
+`app/llm_schemas.py` defines narrow Pydantic schemas for legacy JD extraction, candidate
+review, suggestions, and resume tailoring. The candidate-review schema accepts only IDs from
+the locally extracted candidate list, so the 8B model classifies and merges evidence instead of
+re-extracting the full JD.
 `OllamaClient.json` now:
 
 - validates JSON against the requested schema;
@@ -164,9 +176,12 @@ merged from the master resume and portfolio are deduplicated before display.
 - records attempts on the client and in fallback metadata;
 - logs operation, attempt, model, retryability, and outcome without logging resume content.
 
-Extraction and tailoring store `llm_attempts` and `fallback_reason` so a deterministic
-result is distinguishable from an LLM result. The local model remains the dominant latency
-source, so analysis and generation still run as background tasks.
+Extraction, review, and tailoring store `llm_attempts`, `extraction_stages`, and
+`extraction_fallback_reason` so the active pipeline is visible and deterministic fallback is
+distinguishable from an LLM result. GLiNER is optional (`NLP_PROVIDER=none` by default) and
+lazily loaded; missing packages or cached weights add a warning without blocking analysis.
+The 8B model remains the dominant latency source, so analysis and generation still run as
+background tasks.
 
 ## URL Fetch Security
 
@@ -264,7 +279,7 @@ mypy app
 pytest -q
 ```
 
-Result at the time of this report: **92 tests passed**, Ruff clean, mypy clean. The only test
+Result at the time of this report: **97 tests passed**, Ruff clean, mypy clean. The only test
 warning is Starlette's upstream `TestClient`/`httpx` deprecation notice.
 
 Coverage includes scoring separation, evidence classes, dimension matching, education and
@@ -277,7 +292,8 @@ proxy-aware rate-limit keys, an end-to-end deterministic analyze/generate flow, 
 registration/login, session isolation, CSRF enforcement, session-only storage, session-scoped
 profile status, resume-before-analysis gating, contact extraction, outreach drafting, tracker
 updates, prefill payloads, portal UI/extension controls, Google-style prompt constraints,
-unquantified-impact warnings, manual batched evidence-note reanalysis, validated manual resume
+unquantified-impact warnings, manual batched evidence-note reanalysis, optional GLiNER candidate
+extraction with bounded chunks and dedupe, candidate-only Ollama review, validated manual resume
 edits that regenerate every artifact, and automatic same-company role merging across HTML,
 Markdown, and DOCX rendering.
 
@@ -294,8 +310,11 @@ Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio
 ## Operational Notes
 
 - Bind to `127.0.0.1` unless an authenticated reverse proxy protects the app.
-- `LLM_PROVIDER=none` exercises deterministic extraction, matching, tailoring, and
-  validation without Ollama.
+- `LLM_PROVIDER=none` exercises rules/review fallback, matching, tailoring, and validation
+  without Ollama.
+- `NLP_PROVIDER=none` keeps the app hermetic; install `.[nlp]`, run `job-assist warm-ner`, then
+  set `NLP_PROVIDER=gliner` to enable the local NER stage. `NLP_MODEL_PATH` supports offline
+  weights.
 - `PORTAL_MODE=true` switches to per-user sessions; set `SESSION_COOKIE_SECURE=true` behind an
   HTTPS tunnel and keep `ALLOW_REGISTRATION=false` after provisioning known users.
 - If PDF generation fails, install Chromium with `playwright install chromium`. DOCX,

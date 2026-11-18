@@ -92,7 +92,9 @@ def test_api_errors_include_codes_and_request_ids(tmp_path: Path) -> None:
 
 def test_progress_percentage_tracks_analysis_substages() -> None:
     record = ApplicationRecord(id="progress", status="analyzing", stage="extracting")
-    assert record.progress_pct == 70
+    assert record.progress_pct == 40
+    assert record.model_copy(update={"stage": "reviewing"}).progress_pct == 55
+    assert record.model_copy(update={"stage": "matching"}).progress_pct == 65
     assert record.model_copy(update={"stage": "scoring"}).progress_pct == 85
     assert record.model_copy(update={"stage": "suggestions"}).progress_pct == 95
     assert record.model_copy(update={"stage": "notes"}).progress_pct == 60
@@ -111,7 +113,7 @@ def test_status_includes_progress_percentage(tmp_path: Path) -> None:
     with TestClient(app) as client:
         status = client.get(f"/api/applications/{record.id}/status")
     assert status.status_code == 200
-    assert status.json()["application"]["progress_pct"] == 40
+    assert status.json()["application"]["progress_pct"] == 65
 
     record.status = "generating"
     record.stage = "rendering"

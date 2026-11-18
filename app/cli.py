@@ -85,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
     profile = subparsers.add_parser("profile", help="Refresh and summarize the merged profile.")
     profile.add_argument("--refresh", action="store_true")
 
+    subparsers.add_parser("warm-ner", help="Download and cache the configured GLiNER model.")
+
     args = parser.parse_args(argv)
     if args.command in (None, "serve"):
         if args.command is None:
@@ -97,6 +99,15 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             reload=args.reload,
         )
+        return 0
+    if args.command == "warm-ner":
+        from app.jd.ner import warm_model
+
+        try:
+            print(warm_model(settings))
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
         return 0
     if args.command == "profile":
         from app.profile.service import ProfileService

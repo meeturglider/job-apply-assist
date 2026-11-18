@@ -14,7 +14,7 @@ from fastapi.responses import Response
 
 from app.artifacts import ArtifactStore, FileArtifactStore
 from app.config import Settings
-from app.jd.analyze import analyze_job
+from app.jd.analyze import extract_job_candidates, finalize_job_candidates
 from app.jd.contacts import extract_contacts
 from app.jd.extractor import JobExtraction, extract_job, manual_job_text
 from app.jd.fetcher import FetchError, ManualPasteRequired, fetch_job_page
@@ -223,27 +223,34 @@ class ApplicationService:
 
             self._update(
                 record,
-                company=extraction.company or record.company,
-                role=extraction.title or record.role,
-                stage="matching",
-                message="Loading your resume and portfolio...",
-            )
-            profile = await self.profiles.load(extra_urls=profile_urls)
-            self._write(application_id, "profile.json", profile.model_dump_json(indent=2))
-
-            self._update(
-                record,
                 stage="extracting",
-                message="Extracting requirements with the local model...",
+                message="Extracting skill candidates...",
             )
-            job = await analyze_job(
+            draft = extract_job_candidates(
                 extraction.text,
-                self.llm,
+                self.settings,
                 title=extraction.title,
                 company=extraction.company,
                 location=extraction.location,
                 source_url=url or extraction.source_url,
             )
+
+            self._update(
+                record,
+                stage="reviewing",
+                message="Reviewing extracted candidates with the local model...",
+            )
+            job = await finalize_job_candidates(draft, self.llm)
+
+            self._update(
+                record,
+                company=job.company or extraction.company or record.company,
+                role=job.title or extraction.title or record.role,
+                stage="matching",
+                message="Loading your resume and portfolio...",
+            )
+            profile = await self.profiles.load(extra_urls=profile_urls)
+            self._write(application_id, "profile.json", profile.model_dump_json(indent=2))
             contacts = extract_contacts(
                 extraction.text,
                 job_posting=extraction.job_posting,
