@@ -52,11 +52,13 @@ def test_ui_exposes_structured_resume_editor() -> None:
     assert 'id="edit-resume-button"' in html
     assert 'id="resume-editor"' in html
     assert "function renderResumeEditor" in script
-    assert "function parseSkillGroups" in script
+    assert 'el("button", "icon-button", "+")' in script
+    assert 'roleField: "role"' in script
+    assert 'experienceField: "company"' in script
     assert 'method: "PUT"' in script
     assert "/resume`, {" in script
     assert "Manually edited" in script
-    assert ".resume-editor" in styles
+    assert ".icon-button" in styles
 
 
 def test_progress_steps_mark_done_and_active_states() -> None:

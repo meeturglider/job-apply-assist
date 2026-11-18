@@ -352,6 +352,14 @@ class SkillGroup(BaseModel):
     items: list[str] = Field(default_factory=list)
 
 
+class ResumeRole(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    role: str
+    start: str = ""
+    end: str = ""
+
+
 class ResumeExperience(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -360,6 +368,7 @@ class ResumeExperience(BaseModel):
     location: str = ""
     start: str = ""
     end: str = ""
+    roles: list[ResumeRole] = Field(default_factory=list)
     bullets: list[str] = Field(default_factory=list)
     technologies: list[str] = Field(default_factory=list)
 

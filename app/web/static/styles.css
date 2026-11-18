@@ -1022,22 +1022,112 @@ details.evidence[open] summary::before {
   background: rgba(8, 14, 26, 0.55);
 }
 
-.resume-editor-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 10px;
-}
-
-.resume-editor label {
+.resume-editor-sections {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
+}
+
+.resume-editor-section {
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+
+.resume-editor-section-head,
+.editor-item-head,
+.editor-role-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.resume-editor-section-head h4,
+.editor-item-title {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.resume-editor-section-body,
+.resume-editor .editor-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.editor-item {
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   color: var(--muted);
+  font-size: 10px;
+}
+
+.editor-field input,
+.editor-field textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(8, 14, 26, 0.8);
+  color: var(--text);
+  padding: 8px;
+  font: inherit;
   font-size: 11px;
 }
 
-.resume-editor textarea {
-  min-height: 76px;
+.editor-field textarea {
+  min-height: 72px;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: rgba(22, 34, 56, 0.65);
+  color: var(--accent);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  border-color: rgba(96, 165, 250, 0.5);
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.icon-button.danger {
+  color: #fca5a5;
+}
+
+.editor-roles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.editor-subtitle {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.editor-role-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
 }
 
 .resume-editor-actions {

@@ -49,6 +49,7 @@ from app.rendering.markdown import resume_markdown
 from app.rendering.pdf import RenderError, render_pdf
 from app.store import ApplicationStore, MemoryApplicationStore
 from app.tailoring.builder import build_resume
+from app.tailoring.selection import merge_experience_entries
 from app.tailoring.validator import validate_resume
 
 logger = logging.getLogger(__name__)
@@ -667,6 +668,7 @@ class ApplicationService:
             raise ValueError("Generate a resume before editing it.")
         job = JobDescription.model_validate_json(self._read_text(application_id, "job.json"))
         profile = self._read_profile(application_id)
+        resume.experience = merge_experience_entries(resume.experience, bullet_limit=False)
         validation = validate_resume(resume, profile, job)
         errors = [issue.message for issue in validation.issues if issue.severity == "error"]
         if errors:

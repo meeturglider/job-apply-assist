@@ -11,15 +11,19 @@ from app.models import (
     Requirement,
     ResumeExperience,
     ResumeHeader,
+    ResumeRole,
     SkillGroup,
     TailoredResume,
 )
+from app.rendering.html import resume_html
+from app.rendering.markdown import resume_markdown
 from app.tailoring.builder import build_resume
 from app.tailoring.selection import (
     deterministic_projects,
     deterministic_skills,
     deterministic_summary,
     header_for,
+    merge_experience_entries,
 )
 from app.tailoring.validator import sanitize_resume, validate_resume
 
@@ -69,6 +73,53 @@ def test_tailoring_prompt_locks_google_style() -> None:
     assert "Never invent" in prompt
     assert "simple single-column structure" in prompt
     assert "without inventing one" in prompt
+    assert "Merge multiple roles at the same company" in prompt
+
+
+def test_same_company_roles_merge_into_one_rendered_entry(profile: CandidateProfile) -> None:
+    newer = ResumeExperience(
+        company="Example Corp",
+        role="Senior Platform Engineer",
+        start="Jan 2020",
+        end="Present",
+        bullets=["Built GCP landing zones with Terraform and Kubernetes."],
+        technologies=["Kubernetes"],
+        roles=[ResumeRole(role="Senior Platform Engineer", start="Jan 2020", end="Present")],
+    )
+    older = ResumeExperience(
+        company="Example Corp",
+        role="Systems Engineer",
+        start="Jan 2018",
+        end="Dec 2019",
+        bullets=["Managed Linux servers and cloud networking."],
+        technologies=["Linux"],
+    )
+    merged = merge_experience_entries([newer, older])
+
+    assert len(merged) == 1
+    assert [role.role for role in merged[0].roles] == [
+        "Senior Platform Engineer",
+        "Systems Engineer",
+    ]
+    assert merged[0].start == "Jan 2018"
+    assert merged[0].end == "Present"
+    assert len(merged[0].bullets) == 2
+
+    merged_profile = profile.model_copy(deep=True)
+    merged_profile.experience[1].company = "Example Corp"
+    resume = _resume(merged_profile)
+    resume.summary = merged_profile.summary
+    resume.skills[0].items = ["Kubernetes", "Terraform", "Python"]
+    resume.experience = merged
+    report = validate_resume(resume, merged_profile, _job())
+
+    assert report.valid is True, report.issues
+    html = resume_html(resume)
+    markdown = resume_markdown(resume)
+    assert html.count("Example Corp") == 1
+    assert "Senior Platform Engineer" in html
+    assert "Systems Engineer" in html
+    assert "### Example Corp" in markdown
 
 
 def test_validator_warns_when_recent_bullets_lack_metrics(profile: CandidateProfile) -> None:

@@ -132,6 +132,25 @@
       margin-top: 1px;
     }
 
+    .company-major {
+      font-size: 10.2pt;
+      font-weight: 700;
+      margin-top: 1px;
+    }
+
+    .role-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-top: 2px;
+    }
+
+    .role-name {
+      font-size: 9.7pt;
+      font-weight: 600;
+    }
+
     ul {
       margin: 3px 0 0;
       padding-left: 16px;
@@ -219,11 +238,22 @@
     <h2>Professional Experience</h2>
     {% for entry in resume.experience %}
     <div class="entry">
+      {% if entry.roles %}
+      <p class="company-major">{{ entry.company }}</p>
+      {% if entry.location %}<p class="company">{{ entry.location }}</p>{% endif %}
+      {% for role in entry.roles %}
+      <div class="role-line">
+        <span class="role-name">{{ role.role }}</span>
+        <span class="dates">{{ date_range(role.start, role.end) }}</span>
+      </div>
+      {% endfor %}
+      {% else %}
       <div class="entry-head">
         <span class="role">{{ entry.role }}</span>
         <span class="dates">{{ date_range(entry.start, entry.end) }}</span>
       </div>
       <p class="company">{{ [entry.company, entry.location]|select|join(' | ') }}</p>
+      {% endif %}
       {% if entry.bullets %}
       <ul>
         {% for bullet in entry.bullets %}<li>{{ bullet }}</li>{% endfor %}

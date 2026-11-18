@@ -121,24 +121,45 @@ def render_docx(resume: TailoredResume, output_path: Path) -> Path:
     if resume.experience:
         _section_heading(document, "Professional Experience")
         for entry in resume.experience:
-            role = document.add_paragraph()
-            role.paragraph_format.space_before = Pt(3)
-            role.paragraph_format.space_after = Pt(0)
-            role_run = role.add_run(entry.role)
-            role_run.bold = True
-            role_run.font.size = Pt(10)
-            dates = _date_range(entry.start, entry.end)
-            if dates:
-                dates_run = role.add_run(f"  |  {dates}")
-                dates_run.font.size = Pt(9)
+            if entry.roles:
+                company = document.add_paragraph()
+                company.paragraph_format.space_before = Pt(3)
+                company.paragraph_format.space_after = Pt(0)
+                company_run = company.add_run(entry.company)
+                company_run.bold = True
+                company_run.font.size = Pt(10)
+                if entry.location:
+                    location_run = company.add_run(f"  |  {entry.location}")
+                    location_run.font.size = Pt(9)
+                for role in entry.roles:
+                    role_paragraph = document.add_paragraph()
+                    role_paragraph.paragraph_format.space_after = Pt(0)
+                    role_run = role_paragraph.add_run(role.role)
+                    role_run.bold = True
+                    role_run.font.size = Pt(9.5)
+                    dates = _date_range(role.start, role.end)
+                    if dates:
+                        dates_run = role_paragraph.add_run(f"  |  {dates}")
+                        dates_run.font.size = Pt(9)
+            else:
+                role_line = document.add_paragraph()
+                role_line.paragraph_format.space_before = Pt(3)
+                role_line.paragraph_format.space_after = Pt(0)
+                role_run = role_line.add_run(entry.role)
+                role_run.bold = True
+                role_run.font.size = Pt(10)
+                dates = _date_range(entry.start, entry.end)
+                if dates:
+                    dates_run = role_line.add_run(f"  |  {dates}")
+                    dates_run.font.size = Pt(9)
 
-            company = document.add_paragraph()
-            company.paragraph_format.space_after = Pt(1)
-            company_run = company.add_run(
-                " | ".join(value for value in [entry.company, entry.location] if value)
-            )
-            company_run.font.size = Pt(9)
-            company_run.italic = True
+                company = document.add_paragraph()
+                company.paragraph_format.space_after = Pt(1)
+                company_run = company.add_run(
+                    " | ".join(value for value in [entry.company, entry.location] if value)
+                )
+                company_run.font.size = Pt(9)
+                company_run.italic = True
 
             for bullet in entry.bullets:
                 _bullet(document, bullet)

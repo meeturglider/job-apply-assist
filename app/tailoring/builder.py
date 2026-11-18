@@ -28,6 +28,7 @@ from app.tailoring.selection import (
     find_experience,
     find_project,
     header_for,
+    merge_experience_entries,
     select_bullets,
     select_projects,
 )
@@ -125,7 +126,7 @@ def _llm_experience(
                 technologies=source.technologies[:8],
             )
         )
-    return result
+    return merge_experience_entries(result)
 
 
 def _llm_projects(

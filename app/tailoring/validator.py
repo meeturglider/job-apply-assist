@@ -25,6 +25,7 @@ from app.tailoring.selection import (
     find_experience,
     find_project,
     header_for,
+    merge_experience_entries,
     select_bullets,
 )
 
@@ -246,25 +247,60 @@ def validate_resume(
                 )
             )
             continue
-        if entry.start and source.start and entry.start != source.start:
-            issues.append(
-                ValidationIssue(
-                    location=f"experience/{entry.company}",
-                    message=f"Start date {entry.start} differs from profile {source.start}.",
-                    claim_type="date",
-                    source=source.company,
-                )
-            )
-        if entry.end and source.end and entry.end != source.end:
-            issues.append(
-                ValidationIssue(
-                    location=f"experience/{entry.company}",
-                    message=f"End date {entry.end} differs from profile {source.end}.",
-                    claim_type="date",
-                    source=source.company,
-                )
-            )
         sources = _experience_sources(source)
+        if entry.roles:
+            for role in entry.roles:
+                role_source = find_experience(profile, entry.company, role.role)
+                if role_source is None:
+                    issues.append(
+                        ValidationIssue(
+                            location=f"experience/{entry.company}",
+                            message=f"Role does not match the profile: {role.role}",
+                            claim_type="title",
+                        )
+                    )
+                    continue
+                if role.start and role_source.start and role.start != role_source.start:
+                    issues.append(
+                        ValidationIssue(
+                            location=f"experience/{entry.company}",
+                            message=(
+                                f"Start date {role.start} differs from profile {role_source.start}."
+                            ),
+                            claim_type="date",
+                            source=role_source.company,
+                        )
+                    )
+                if role.end and role_source.end and role.end != role_source.end:
+                    issues.append(
+                        ValidationIssue(
+                            location=f"experience/{entry.company}",
+                            message=f"End date {role.end} differs from profile {role_source.end}.",
+                            claim_type="date",
+                            source=role_source.company,
+                        )
+                    )
+                sources.extend(_experience_sources(role_source))
+        else:
+            if entry.start and source.start and entry.start != source.start:
+                issues.append(
+                    ValidationIssue(
+                        location=f"experience/{entry.company}",
+                        message=f"Start date {entry.start} differs from profile {source.start}.",
+                        claim_type="date",
+                        source=source.company,
+                    )
+                )
+            if entry.end and source.end and entry.end != source.end:
+                issues.append(
+                    ValidationIssue(
+                        location=f"experience/{entry.company}",
+                        message=f"End date {entry.end} differs from profile {source.end}.",
+                        claim_type="date",
+                        source=source.company,
+                    )
+                )
+        sources = list(dict.fromkeys(sources))
         issues.extend(
             _technologies_issues(
                 entry.technologies,
@@ -380,18 +416,18 @@ def sanitize_resume(
 
     experience: list[ResumeExperience] = []
     for index, source in enumerate(profile.experience):
-        generated_experience = next(
-            (
-                entry
-                for entry in resume.experience
-                if find_experience(profile, entry.company, entry.role) is source
-            ),
-            None,
-        )
+        generated_entries = [
+            entry
+            for entry in resume.experience
+            if find_experience(profile, entry.company, entry.role) is source
+            or any(
+                find_experience(profile, entry.company, role.role) is source for role in entry.roles
+            )
+        ]
         sources = _experience_sources(source)
         bullets = []
-        if generated_experience:
-            for bullet in generated_experience.bullets:
+        for generated_entry in generated_entries:
+            for bullet in generated_entry.bullets:
                 bullet_issues, _, _, _ = _claim_issues(
                     bullet,
                     sources,
@@ -399,8 +435,9 @@ def sanitize_resume(
                 )
                 if bullet_issues:
                     continue
-                bullets.append(bullet)
-            bullets = bullets[: experience_bullet_limit(index)]
+                if bullet not in bullets:
+                    bullets.append(bullet)
+        bullets = bullets[: experience_bullet_limit(index)]
         if not bullets:
             bullets = select_bullets(source.bullets, job, experience_bullet_limit(index))
         if not bullets and source.summary:
@@ -470,7 +507,7 @@ def sanitize_resume(
         header=header_for(profile, job),
         summary=summary,
         skills=skills,
-        experience=experience,
+        experience=merge_experience_entries(experience),
         projects=projects,
         certifications=certifications,
         education=deterministic_education(profile),

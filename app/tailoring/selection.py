@@ -12,6 +12,7 @@ from app.models import (
     ResumeExperience,
     ResumeHeader,
     ResumeProject,
+    ResumeRole,
     SkillGroup,
     TailoredResume,
 )
@@ -87,6 +88,112 @@ def experience_bullet_limit(index: int) -> int:
     if index <= 3:
         return 2
     return 1
+
+
+MONTH_INDEX = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+
+def _date_key(value: str) -> tuple[int, int]:
+    text = value.strip()
+    if text.casefold() == "present":
+        return (9999, 12)
+    match = re.match(r"([A-Za-z]{3})\s+(\d{4})", text)
+    if not match:
+        return (0, 0)
+    return (int(match.group(2)), MONTH_INDEX.get(match.group(1)[:3].casefold(), 0))
+
+
+def _unique_values(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        key = _norm(value)
+        if key and key not in seen:
+            seen.add(key)
+            result.append(value)
+    return result
+
+
+def merge_experience_entries(
+    entries: list[ResumeExperience], *, bullet_limit: bool = True
+) -> list[ResumeExperience]:
+    groups: dict[str, list[ResumeExperience]] = {}
+    order: list[str] = []
+    for entry in entries:
+        key = _norm(entry.company) or entry.company.strip().casefold()
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(entry)
+
+    result: list[ResumeExperience] = []
+    for group_index, key in enumerate(order):
+        group = groups[key]
+        if len(group) == 1 and not group[0].roles:
+            result.append(group[0])
+            continue
+
+        roles: list[ResumeRole] = []
+        seen_roles: set[tuple[str, str, str]] = set()
+        for entry in group:
+            entry_roles = entry.roles or [
+                ResumeRole(role=entry.role, start=entry.start, end=entry.end)
+            ]
+            for role in entry_roles:
+                marker = (role.role.strip().casefold(), role.start.strip(), role.end.strip())
+                if not marker[0] or marker in seen_roles:
+                    continue
+                seen_roles.add(marker)
+                roles.append(role)
+        if not roles:
+            continue
+        roles.sort(key=lambda role: _date_key(role.start), reverse=True)
+        ordered_entries = sorted(group, key=lambda entry: _date_key(entry.start), reverse=True)
+        newest_entry = ordered_entries[0]
+        newest_role = roles[0]
+        starts = [role.start for role in roles if role.start]
+        start = min(starts, key=_date_key) if starts else ""
+        end = (
+            "Present"
+            if any(role.end.casefold() == "present" for role in roles)
+            else newest_role.end
+        )
+        bullets = _unique_values(
+            [bullet for entry in ordered_entries for bullet in entry.bullets if bullet.strip()]
+        )
+        if bullet_limit:
+            limit = min(5, experience_bullet_limit(group_index) + len(group) - 1)
+            bullets = bullets[:limit]
+        technologies = _unique_values(
+            [tech for entry in ordered_entries for tech in entry.technologies if tech.strip()]
+        )[:8]
+        result.append(
+            ResumeExperience(
+                company=newest_entry.company,
+                role=newest_role.role,
+                location=newest_entry.location
+                or next((entry.location for entry in ordered_entries if entry.location), ""),
+                start=start,
+                end=end,
+                roles=roles,
+                bullets=bullets,
+                technologies=technologies,
+            )
+        )
+    return result
 
 
 def deterministic_skills(
@@ -243,7 +350,7 @@ def deterministic_experience(
                 technologies=entry.technologies[:8],
             )
         )
-    return result
+    return merge_experience_entries(result)
 
 
 def deterministic_projects(profile: CandidateProfile, job: JobDescription) -> list[ResumeProject]:

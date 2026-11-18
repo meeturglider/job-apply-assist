@@ -137,11 +137,12 @@ quantified impact.
 
 ### Editing the Generated Resume
 
-Generated resumes can be refined in the browser before download. The structured editor exposes
-the targeted summary, skill groups, and experience/project bullets; names, dates, employers,
-education, and certifications stay fixed to preserve claim traceability. Saving revalidates every
-edit against the uploaded evidence, rejects unsupported claims or invented metrics, rewrites all
-formats plus the validation and ATS reports, and marks the artifact as manually edited.
+Generated resumes can be refined in the browser before download. The structured editor groups
+fields by topic, uses `+` controls to add skill groups, experience entries, roles, projects, and
+bullets, and allows company, role, and date edits. Multiple roles at the same employer are merged
+automatically into one company block with each role and date range shown once. Saving revalidates
+every edit against the uploaded evidence, rejects unsupported claims or invented metrics, rewrites
+all formats plus the validation and ATS reports, and marks the artifact as manually edited.
 
 ## Reviewing Evidence and Notes
 

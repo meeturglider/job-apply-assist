@@ -3,6 +3,7 @@ const state = {
   timer: null,
   mode: "analysis",
   detail: null,
+  resumeDraft: null,
   portalMode: false,
   allowRegistration: false,
   authMode: "login",
@@ -782,6 +783,7 @@ function renderGenerated(detail) {
   const hasArtifacts = artifacts.length > 0 && record.status === "generated";
   generated.hidden = !hasArtifacts;
   $("resume-editor").hidden = true;
+  state.resumeDraft = null;
   if (!hasArtifacts) return;
 
   const metadata = detail.metadata || {};
@@ -819,6 +821,10 @@ function renderGenerated(detail) {
   renderValidation(detail.validation);
 }
 
+function cloneResume(resume) {
+  return JSON.parse(JSON.stringify(resume));
+}
+
 function parseLineList(value) {
   return String(value || "")
     .split("\n")
@@ -833,67 +839,325 @@ function parseInlineList(value) {
     .filter(Boolean);
 }
 
-function parseSkillGroups(value) {
-  return parseLineList(value)
-    .map((line) => {
-      const separator = line.indexOf(":");
-      if (separator === -1) {
-        return { category: "Skills", items: parseInlineList(line) };
-      }
-      return {
-        category: line.slice(0, separator).trim() || "Skills",
-        items: parseInlineList(line.slice(separator + 1)),
-      };
-    })
-    .filter((group) => group.items.length > 0);
+function resumeDateRank(value) {
+  const text = String(value || "").trim();
+  if (text.toLowerCase() === "present") return 999912;
+  const match = /^([A-Za-z]{3})\s+(\d{4})$/.exec(text);
+  if (!match) return 0;
+  const months = {
+    jan: 1,
+    feb: 2,
+    mar: 3,
+    apr: 4,
+    may: 5,
+    jun: 6,
+    jul: 7,
+    aug: 8,
+    sep: 9,
+    oct: 10,
+    nov: 11,
+    dec: 12,
+  };
+  return Number(match[2]) * 100 + (months[match[1].slice(0, 3).toLowerCase()] || 0);
 }
 
-function addEditorTextarea(container, label, value, field) {
-  const wrapper = el("label", "", label);
+function roleListFor(entry) {
+  const roles = entry.roles?.length
+    ? entry.roles
+    : [{ role: entry.role || "", start: entry.start || "", end: entry.end || "" }];
+  return roles.map((role) => ({
+    role: role.role || "",
+    start: role.start || "",
+    end: role.end || "",
+  }));
+}
+
+function applyDataset(node, values) {
+  Object.entries(values || {}).forEach(([key, value]) => {
+    node.dataset[key] = String(value);
+  });
+}
+
+function editorInput(parent, label, value, dataset) {
+  const wrapper = el("label", "editor-field", label);
+  const input = el("input", "note-input");
+  input.type = "text";
+  input.value = value || "";
+  applyDataset(input, dataset);
+  wrapper.appendChild(input);
+  parent.appendChild(wrapper);
+  return input;
+}
+
+function editorTextarea(parent, label, value, dataset) {
+  const wrapper = el("label", "editor-field", label);
   const textarea = el("textarea", "note-input");
   textarea.value = value || "";
-  textarea.dataset.resumeField = field;
+  applyDataset(textarea, dataset);
   wrapper.appendChild(textarea);
-  container.appendChild(wrapper);
+  parent.appendChild(wrapper);
+  return textarea;
+}
+
+function addButton(label, handler) {
+  const button = el("button", "icon-button", "+");
+  button.type = "button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.addEventListener("click", handler);
+  return button;
+}
+
+function removeButton(label, handler) {
+  const button = el("button", "icon-button danger", "×");
+  button.type = "button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.addEventListener("click", handler);
+  return button;
+}
+
+function editorSection(title, addHandler) {
+  const section = el("div", "resume-editor-section");
+  const head = el("div", "resume-editor-section-head");
+  head.appendChild(el("h4", "", title));
+  if (addHandler) head.appendChild(addButton(`Add ${title.toLowerCase()}`, addHandler));
+  section.appendChild(head);
+  const body = el("div", "resume-editor-section-body");
+  section.appendChild(body);
+  return { section, body };
+}
+
+function editorItem(parent, title, removeHandler) {
+  const item = el("div", "editor-item");
+  const head = el("div", "editor-item-head");
+  head.appendChild(el("span", "editor-item-title", title));
+  head.appendChild(removeButton(`Remove ${title}`, removeHandler));
+  item.appendChild(head);
+  const body = el("div", "editor-fields");
+  item.appendChild(body);
+  parent.appendChild(item);
+  return body;
+}
+
+function syncResumeDraftFromEditor() {
+  const draft = state.resumeDraft;
+  if (!draft) return;
+  const editor = $("resume-editor");
+  const summary = editor.querySelector('[data-resume-field="summary"]');
+  if (summary) draft.summary = summary.value.trim();
+
+  editor.querySelectorAll("[data-skill-field]").forEach((node) => {
+    const group = draft.skills?.[Number(node.dataset.skillIndex)];
+    if (!group) return;
+    const field = node.dataset.skillField;
+    group[field] = field === "items" ? parseInlineList(node.value) : node.value.trim();
+  });
+
+  editor.querySelectorAll("[data-experience-field]").forEach((node) => {
+    const entry = draft.experience?.[Number(node.dataset.experienceIndex)];
+    if (!entry) return;
+    const field = node.dataset.experienceField;
+    entry[field] = field === "bullets" ? parseLineList(node.value) : node.value.trim();
+  });
+
+  editor.querySelectorAll("[data-role-field]").forEach((node) => {
+    const entry = draft.experience?.[Number(node.dataset.experienceIndex)];
+    if (!entry) return;
+    if (!entry.roles?.length) entry.roles = roleListFor(entry);
+    const index = Number(node.dataset.roleIndex);
+    while (entry.roles.length <= index) {
+      entry.roles.push({ role: "", start: "", end: "" });
+    }
+    entry.roles[index][node.dataset.roleField] = node.value.trim();
+  });
+
+  (draft.experience || []).forEach((entry) => {
+    if (!entry.roles?.length) return;
+    const starts = entry.roles.map((role) => role.start).filter(Boolean);
+    const ends = entry.roles.map((role) => role.end).filter(Boolean);
+    entry.role = entry.roles[0].role || entry.role;
+    entry.start = starts.sort((a, b) => resumeDateRank(a) - resumeDateRank(b))[0] || "";
+    entry.end = entry.roles.some((role) => role.end.toLowerCase() === "present")
+      ? "Present"
+      : ends.sort((a, b) => resumeDateRank(a) - resumeDateRank(b))[ends.length - 1] || "";
+  });
+
+  editor.querySelectorAll("[data-project-field]").forEach((node) => {
+    const project = draft.projects?.[Number(node.dataset.projectIndex)];
+    if (!project) return;
+    const field = node.dataset.projectField;
+    project[field] = field === "bullets" ? parseLineList(node.value) : node.value.trim();
+  });
 }
 
 function renderResumeEditor() {
   const editor = $("resume-editor");
-  const resume = state.detail?.resume;
+  const draft = state.resumeDraft;
   clear(editor);
-  if (!resume) {
+  if (!draft) {
     editor.appendChild(el("p", "muted", "Resume content is unavailable."));
     return;
   }
-  const grid = el("div", "resume-editor-grid");
-  addEditorTextarea(grid, "Targeted summary", resume.summary || "", "summary");
-  addEditorTextarea(
-    grid,
-    "Skills (one category per line: Category: item, item)",
-    (resume.skills || [])
-      .map((group) => `${group.category}: ${(group.items || []).join(", ")}`)
-      .join("\n"),
-    "skills",
-  );
-  (resume.experience || []).forEach((entry, index) => {
-    const heading = `${entry.role || "Role"} — ${entry.company || "Company"}`;
-    addEditorTextarea(
-      grid,
-      `${heading} bullets (one per line)`,
-      (entry.bullets || []).join("\n"),
-      `experience:${index}`,
-    );
+  draft.skills = draft.skills || [];
+  draft.experience = draft.experience || [];
+  draft.projects = draft.projects || [];
+  const sections = el("div", "resume-editor-sections");
+
+  const summary = editorSection("Career Summary");
+  editorTextarea(summary.body, "Targeted summary", draft.summary || "", {
+    resumeField: "summary",
   });
-  (resume.projects || []).forEach((entry, index) => {
-    const heading = `${entry.name || "Project"}${entry.context ? ` — ${entry.context}` : ""}`;
-    addEditorTextarea(
-      grid,
-      `${heading} bullets (one per line)`,
-      (entry.bullets || []).join("\n"),
-      `project:${index}`,
-    );
+  sections.appendChild(summary.section);
+
+  const skills = editorSection("Skills", () => {
+    syncResumeDraftFromEditor();
+    draft.skills.push({ category: "New category", items: [] });
+    renderResumeEditor();
   });
-  editor.appendChild(grid);
+  draft.skills.forEach((group, index) => {
+    const body = editorItem(skills.body, group.category || `Skill group ${index + 1}`, () => {
+      syncResumeDraftFromEditor();
+      draft.skills.splice(index, 1);
+      renderResumeEditor();
+    });
+    editorInput(body, "Category", group.category || "", {
+      skillIndex: index,
+      skillField: "category",
+    });
+    editorTextarea(body, "Items (comma or line separated)", (group.items || []).join(", "), {
+      skillIndex: index,
+      skillField: "items",
+    });
+  });
+  sections.appendChild(skills.section);
+
+  const experience = editorSection("Professional Experience", () => {
+    syncResumeDraftFromEditor();
+    draft.experience.push({ company: "", role: "", location: "", bullets: [""], roles: [] });
+    renderResumeEditor();
+  });
+  draft.experience.forEach((entry, index) => {
+    const roles = roleListFor(entry);
+    const roleNames = roles.map((role) => role.role).filter(Boolean).join(" / ");
+    const title = `${entry.company || "Company"} — ${roleNames || "Role"}`;
+    const body = editorItem(experience.body, title, () => {
+      syncResumeDraftFromEditor();
+      draft.experience.splice(index, 1);
+      renderResumeEditor();
+    });
+    editorInput(body, "Company", entry.company || "", {
+      experienceIndex: index,
+      experienceField: "company",
+    });
+    editorInput(body, "Location", entry.location || "", {
+      experienceIndex: index,
+      experienceField: "location",
+    });
+
+    const rolesWrap = el("div", "editor-roles");
+    rolesWrap.appendChild(el("span", "editor-subtitle", "Roles"));
+    roles.forEach((role, roleIndex) => {
+      const roleBody = editorItem(
+        rolesWrap,
+        role.role || `Role ${roleIndex + 1}`,
+        () => {
+          syncResumeDraftFromEditor();
+          entry.roles = roleListFor(entry);
+          entry.roles.splice(roleIndex, 1);
+          renderResumeEditor();
+        },
+      );
+      editorInput(roleBody, "Role", role.role || "", {
+        experienceIndex: index,
+        roleIndex,
+        roleField: "role",
+      });
+      editorInput(roleBody, "Start", role.start || "", {
+        experienceIndex: index,
+        roleIndex,
+        roleField: "start",
+      });
+      editorInput(roleBody, "End", role.end || "", {
+        experienceIndex: index,
+        roleIndex,
+        roleField: "end",
+      });
+    });
+    const roleActions = el("div", "editor-role-actions");
+    roleActions.appendChild(
+      addButton("Add role", () => {
+        syncResumeDraftFromEditor();
+        entry.roles = roleListFor(entry);
+        entry.roles.push({ role: "", start: "", end: "" });
+        renderResumeEditor();
+      }),
+    );
+    roleActions.appendChild(el("span", "muted", "Add role"));
+    body.appendChild(roleActions);
+    body.appendChild(rolesWrap);
+
+    editorTextarea(body, "Bullets (one per line)", (entry.bullets || []).join("\n"), {
+      experienceIndex: index,
+      experienceField: "bullets",
+    });
+    const bulletActions = el("div", "editor-role-actions");
+    bulletActions.appendChild(
+      addButton("Add bullet", () => {
+        syncResumeDraftFromEditor();
+        entry.bullets = entry.bullets || [];
+        entry.bullets.push("");
+        renderResumeEditor();
+      }),
+    );
+    bulletActions.appendChild(el("span", "muted", "Add bullet"));
+    body.appendChild(bulletActions);
+  });
+  sections.appendChild(experience.section);
+
+  const projects = editorSection("Projects", () => {
+    syncResumeDraftFromEditor();
+    draft.projects.push({ name: "", context: "", period: "", bullets: [""] });
+    renderResumeEditor();
+  });
+  draft.projects.forEach((project, index) => {
+    const title = project.name || `Project ${index + 1}`;
+    const body = editorItem(projects.body, title, () => {
+      syncResumeDraftFromEditor();
+      draft.projects.splice(index, 1);
+      renderResumeEditor();
+    });
+    editorInput(body, "Name", project.name || "", {
+      projectIndex: index,
+      projectField: "name",
+    });
+    editorInput(body, "Context", project.context || "", {
+      projectIndex: index,
+      projectField: "context",
+    });
+    editorInput(body, "Period", project.period || "", {
+      projectIndex: index,
+      projectField: "period",
+    });
+    editorTextarea(body, "Bullets (one per line)", (project.bullets || []).join("\n"), {
+      projectIndex: index,
+      projectField: "bullets",
+    });
+    const bulletActions = el("div", "editor-role-actions");
+    bulletActions.appendChild(
+      addButton("Add project bullet", () => {
+        syncResumeDraftFromEditor();
+        project.bullets = project.bullets || [];
+        project.bullets.push("");
+        renderResumeEditor();
+      }),
+    );
+    bulletActions.appendChild(el("span", "muted", "Add bullet"));
+    body.appendChild(bulletActions);
+  });
+  sections.appendChild(projects.section);
+
+  editor.appendChild(sections);
 
   const actions = el("div", "resume-editor-actions");
   const save = el("button", "primary-button", "Save resume edits");
@@ -904,6 +1168,7 @@ function renderResumeEditor() {
   cancel.type = "button";
   cancel.addEventListener("click", () => {
     editor.hidden = true;
+    state.resumeDraft = null;
   });
   actions.appendChild(save);
   actions.appendChild(cancel);
@@ -913,33 +1178,21 @@ function renderResumeEditor() {
 function toggleResumeEditor() {
   const editor = $("resume-editor");
   if (!editor.hidden) {
+    syncResumeDraftFromEditor();
     editor.hidden = true;
+    state.resumeDraft = null;
     return;
   }
+  if (!state.detail?.resume) return;
+  state.resumeDraft = cloneResume(state.detail.resume);
   renderResumeEditor();
   editor.hidden = false;
 }
 
 async function saveResumeEdits() {
-  if (!state.currentId || !state.detail?.resume) return;
-  const editor = $("resume-editor");
-  const resume = JSON.parse(JSON.stringify(state.detail.resume));
-  editor.querySelectorAll("[data-resume-field]").forEach((node) => {
-    const field = node.dataset.resumeField;
-    if (field === "summary") {
-      resume.summary = node.value.trim();
-      return;
-    }
-    if (field === "skills") {
-      resume.skills = parseSkillGroups(node.value);
-      return;
-    }
-    const [kind, index] = field.split(":");
-    const target =
-      kind === "experience" ? resume.experience?.[Number(index)] : resume.projects?.[Number(index)];
-    if (target) target.bullets = parseLineList(node.value);
-  });
-
+  if (!state.currentId || !state.resumeDraft) return;
+  syncResumeDraftFromEditor();
+  const resume = cloneResume(state.resumeDraft);
   const button = $("save-resume-edits");
   button.disabled = true;
   button.textContent = "Saving edits...";
@@ -1352,6 +1605,7 @@ async function boot() {
 $("analyze-form").addEventListener("submit", submitAnalysis);
 $("generate-button").addEventListener("click", generateResume);
 $("edit-resume-button").addEventListener("click", toggleResumeEditor);
+$("resume-editor").addEventListener("input", syncResumeDraftFromEditor);
 $("revalidate-button").addEventListener("click", revalidateNotes);
 $("refresh-profile").addEventListener("click", refreshProfile);
 $("upload-resume").addEventListener("click", uploadResume);

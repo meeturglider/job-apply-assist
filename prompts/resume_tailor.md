@@ -36,6 +36,7 @@ Hard rules:
 - You may reorder, select, condense, and rephrase existing facts.
 - Mirror the job's terminology only when the profile supports the claim.
 - Keep every employment entry, but condense older roles to exactly 1 bullet.
+- Merge multiple roles at the same company into one company block with each role and its date range listed once.
 - Recent roles should have at most 3-4 concise bullets. Put the most job-relevant evidence first.
 - Keep the resume to one page for early-career profiles; use two only when strong relevant depth requires it.
 - Write recent-role bullets in X, Y, Z form: accomplished X, measured by Y, by doing Z.

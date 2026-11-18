@@ -34,13 +34,24 @@ def resume_markdown(resume: TailoredResume) -> str:
     if resume.experience:
         lines.extend(["## Professional Experience", ""])
         for entry in resume.experience:
-            lines.append(f"### {entry.role}")
-            company_line = " | ".join(value for value in [entry.company, entry.location] if value)
-            dates = _date_range(entry.start, entry.end)
-            if dates:
-                company_line = f"{company_line} | {dates}" if company_line else dates
-            if company_line:
-                lines.append(company_line)
+            if entry.roles:
+                company_line = " | ".join(
+                    value for value in [entry.company, entry.location] if value
+                )
+                lines.append(f"### {company_line or entry.company}")
+                for role in entry.roles:
+                    dates = _date_range(role.start, role.end)
+                    lines.append(f"{role.role} | {dates}" if dates else role.role)
+            else:
+                lines.append(f"### {entry.role}")
+                company_line = " | ".join(
+                    value for value in [entry.company, entry.location] if value
+                )
+                dates = _date_range(entry.start, entry.end)
+                if dates:
+                    company_line = f"{company_line} | {dates}" if company_line else dates
+                if company_line:
+                    lines.append(company_line)
             for bullet in entry.bullets:
                 lines.append(f"- {bullet}")
             lines.append("")
