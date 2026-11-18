@@ -12,8 +12,9 @@ from app.models import (
     ExperienceEntry,
     Identity,
     ProjectEntry,
+    origin_for_source,
 )
-from app.profile.master_resume import parse_master_resume, years_of_experience
+from app.profile.master_resume import parse_master_resume, tag_resume_origin, years_of_experience
 from app.profile.portfolio import PortfolioSnapshot
 from app.skills import lexicon
 
@@ -217,8 +218,11 @@ def _merge_identity(master: Identity, portfolio: Identity, portfolio_url: str) -
     )
 
 
-def build_profile(master_path: Path, portfolio: PortfolioSnapshot | None) -> CandidateProfile:
+def build_profile(
+    master_path: Path, portfolio: PortfolioSnapshot | None, *, uploaded_resume: bool = False
+) -> CandidateProfile:
     master = parse_master_resume(master_path)
+    tag_resume_origin(master, master_path.name, uploaded=uploaded_resume)
     if portfolio is None:
         master.warnings.append("Portfolio data was unavailable; using MASTER_RESUME.md only.")
         return master
@@ -237,16 +241,20 @@ def build_profile(master_path: Path, portfolio: PortfolioSnapshot | None) -> Can
     skills = _merge_evidence(master.skills, portfolio_profile.skills)
 
     for entry in experience:
+        origin = origin_for_source(entry.sources[0] if entry.sources else "", "derived")
         for text in [entry.summary, *entry.bullets]:
             for canonical, _ in lexicon.find(text):
-                evidence = Evidence(source=f"{entry.company} / {entry.role}", text=text)
+                evidence = Evidence(
+                    source=f"{entry.company} / {entry.role}", text=text, origin=origin
+                )
                 bucket = skills.setdefault(canonical, [])
                 if all(item.text != evidence.text for item in bucket):
                     bucket.append(evidence)
     for project in projects:
+        origin = origin_for_source(project.sources[0] if project.sources else "", "derived")
         for text in [project.summary, *project.bullets]:
             for canonical, _ in lexicon.find(text):
-                evidence = Evidence(source=project.name, text=text)
+                evidence = Evidence(source=project.name, text=text, origin=origin)
                 bucket = skills.setdefault(canonical, [])
                 if all(item.text != evidence.text for item in bucket):
                     bucket.append(evidence)

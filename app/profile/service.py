@@ -9,6 +9,7 @@ from app.profile.extras import load_extra_profiles
 from app.profile.master_resume import parse_master_resume_text
 from app.profile.merge import build_profile, merge_profiles, profile_hash
 from app.profile.portfolio import PortfolioSnapshot, load_portfolio
+from app.profile.provenance import summarize_provenance
 
 MAX_RESUME_BYTES = 1_000_000
 
@@ -53,7 +54,9 @@ class ProfileService:
         if not master_path.exists():
             raise FileNotFoundError(f"Resume not found: {master_path}")
 
-        profile = build_profile(master_path, portfolio)
+        profile = build_profile(
+            master_path, portfolio, uploaded_resume=self.uploaded_resume_path.exists()
+        )
         if extra_urls:
             try:
                 extras = await load_extra_profiles(extra_urls, self.settings)
@@ -61,6 +64,15 @@ class ProfileService:
                 profile.warnings.extend(extras.warnings)
             except Exception as exc:
                 profile.warnings.append(f"Additional profile sources failed: {exc}")
+        profile.provenance = summarize_provenance(
+            profile,
+            resume_kind="uploaded" if self.uploaded_resume_path.exists() else "default",
+            resume_name=master_path.name,
+            portfolio_url=self.settings.portfolio_base_url,
+            portfolio_cached=portfolio is not None,
+            portfolio_fetched_at=portfolio.fetched_at.isoformat() if portfolio else "",
+            extra_urls=list(extra_urls or []),
+        )
         self.profile_path.parent.mkdir(parents=True, exist_ok=True)
         self.profile_path.write_text(profile.model_dump_json(indent=2), encoding="utf-8")
         return profile
@@ -96,6 +108,7 @@ class ProfileService:
             "award_count": len(profile.awards),
             "warnings": profile.warnings,
             "sources": profile.sources,
+            "provenance": profile.provenance.model_dump(),
         }
 
     def _load_cached_portfolio(self) -> PortfolioSnapshot | None:

@@ -25,6 +25,9 @@ def _tagged(profile: CandidateProfile, url: str) -> CandidateProfile:
     for items in tagged.skills.values():
         for evidence in items:
             evidence.source = f"{url} | {evidence.source}" if evidence.source else url
+            evidence.origin = "additional_url"
+            evidence.origin_label = "Additional URL"
+            evidence.source_url = url
     for entry in tagged.experience:
         entry.sources = [f"{url} | {source}" if source else url for source in entry.sources]
     for project in tagged.projects:
@@ -33,6 +36,8 @@ def _tagged(profile: CandidateProfile, url: str) -> CandidateProfile:
     sources["additional_url"] = url
     tagged.sources = sources
     tagged.warnings = [f"{url}: {warning}" for warning in tagged.warnings]
+    tagged.provenance.portfolio_url = url
+    tagged.provenance.extra_urls = [url]
     return tagged
 
 

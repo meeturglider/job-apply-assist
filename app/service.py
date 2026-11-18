@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -13,9 +14,13 @@ from app.jd.analyze import analyze_job
 from app.jd.extractor import JobExtraction, extract_job, manual_job_text
 from app.jd.fetcher import FetchError, ManualPasteRequired, fetch_job_page
 from app.llm import OllamaClient
+from app.matching.matcher import literal_keyword_presence
+from app.matching.provenance import attach_analysis_provenance
 from app.matching.scorer import analyze_match
 from app.matching.suggestions import enrich_profile_suggestions
 from app.models import (
+    AnalysisNote,
+    AnalysisResult,
     ApplicationRecord,
     ArtifactInfo,
     AtsCheck,
@@ -24,6 +29,7 @@ from app.models import (
     JobDescription,
     ValidationReport,
 )
+from app.profile.notes import apply_notes
 from app.profile.service import ProfileService
 from app.rendering.ats import check_ats, check_docx
 from app.rendering.docx import render_docx
@@ -39,6 +45,14 @@ logger = logging.getLogger(__name__)
 def _slug(value: str) -> str:
     value = re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
     return value[:48] or "role"
+
+
+def _notes_revision(notes: list[AnalysisNote]) -> str:
+    payload = [
+        {"target": note.target.strip(), "text": " ".join(note.text.split())} for note in notes
+    ]
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
 
 
 class ApplicationService:
@@ -191,8 +205,8 @@ class ApplicationService:
 
             self._update(
                 record,
-                stage="analyzing",
-                message="Extracting requirements and matching your evidence...",
+                stage="extracting",
+                message="Extracting requirements with the local model...",
             )
             job = await analyze_job(
                 extraction.text,
@@ -202,8 +216,19 @@ class ApplicationService:
                 location=extraction.location,
                 source_url=url or extraction.source_url,
             )
+            self._update(
+                record,
+                stage="scoring",
+                message="Matching evidence and calculating your score...",
+            )
             analysis = analyze_match(job, profile)
+            self._update(
+                record,
+                stage="suggestions",
+                message="Checking profile suggestions with the local model...",
+            )
             analysis = await enrich_profile_suggestions(job, profile, analysis, self.llm)
+            analysis = self._finalize_analysis(analysis, profile)
 
             (directory / "job.json").write_text(job.model_dump_json(indent=2), encoding="utf-8")
             (directory / "analysis.json").write_text(
@@ -253,6 +278,18 @@ class ApplicationService:
                 error="internal_error",
             )
 
+    def _finalize_analysis(
+        self, analysis: AnalysisResult, profile: CandidateProfile
+    ) -> AnalysisResult:
+        suggestions = [
+            item
+            for item in analysis.keyword_suggestions
+            if not literal_keyword_presence(item.keyword, profile)
+        ]
+        return attach_analysis_provenance(
+            analysis.model_copy(update={"keyword_suggestions": suggestions}), profile
+        )
+
     async def _ingest(self, *, url: str, text: str) -> JobExtraction:
         if text.strip() and len(text.strip()) >= 100:
             return manual_job_text(text, url)
@@ -280,12 +317,132 @@ class ApplicationService:
             json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8"
         )
 
+    def save_notes(self, application_id: str, entries: list[dict[str, str]]) -> ApplicationRecord:
+        record = self.store.get(application_id)
+        if record is None:
+            raise ValueError("Application not found.")
+        if record.status in {"queued", "analyzing", "generating"}:
+            raise ValueError("Wait for the current task to finish before editing notes.")
+        notes = [
+            AnalysisNote(target=item["target"].strip(), text=item["text"].strip())
+            for item in entries
+        ]
+        revision = _notes_revision(notes)
+        directory = self._directory(application_id)
+        (directory / "notes.json").write_text(
+            json.dumps([item.model_dump(mode="json") for item in notes], indent=2),
+            encoding="utf-8",
+        )
+        (directory / "profile.noted.json").unlink(missing_ok=True)
+        return self._update(
+            record,
+            status="analyzed",
+            stage="notes",
+            message="Evidence notes changed. Revalidate before generating.",
+            notes=notes,
+            notes_revision=revision,
+            notes_validated_revision="",
+            artifacts=[],
+            error="",
+        )
+
+    def start_revalidation(self, application_id: str) -> ApplicationRecord:
+        record = self.store.get(application_id)
+        if record is None:
+            raise ValueError("Application not found.")
+        if record.status not in {"analyzed", "generated"}:
+            raise ValueError("Analyze the job before revalidating notes.")
+        directory = self._directory(application_id)
+        if not (directory / "job.json").exists() or not (directory / "profile.json").exists():
+            raise ValueError("Analyze the job before revalidating notes.")
+        self._update(
+            record,
+            status="analyzing",
+            stage="notes",
+            message="Revalidating with your evidence notes...",
+        )
+        task = asyncio.create_task(self._revalidate(application_id))
+        self._track(task)
+        return record
+
+    async def _revalidate(self, application_id: str) -> None:
+        record = self.store.get(application_id)
+        if record is None:
+            return
+        directory = self._directory(application_id)
+        try:
+            job = JobDescription.model_validate_json(
+                (directory / "job.json").read_text(encoding="utf-8")
+            )
+            profile = CandidateProfile.model_validate_json(
+                (directory / "profile.json").read_text(encoding="utf-8")
+            )
+            analysis_path = directory / "analysis.json"
+            baseline_path = directory / "analysis.baseline.json"
+            if analysis_path.exists() and not baseline_path.exists():
+                baseline_path.write_bytes(analysis_path.read_bytes())
+
+            noted_profile, decisions = apply_notes(profile, record.notes)
+            (directory / "notes.json").write_text(
+                json.dumps([item.model_dump(mode="json") for item in decisions], indent=2),
+                encoding="utf-8",
+            )
+            (directory / "profile.noted.json").write_text(
+                noted_profile.model_dump_json(indent=2), encoding="utf-8"
+            )
+
+            self._update(
+                record,
+                stage="scoring",
+                message="Scoring your evidence notes...",
+            )
+            analysis = analyze_match(job, noted_profile)
+            self._update(
+                record,
+                stage="suggestions",
+                message="Refreshing profile suggestions...",
+            )
+            analysis = await enrich_profile_suggestions(job, noted_profile, analysis, self.llm)
+            analysis = self._finalize_analysis(analysis, noted_profile)
+            analysis_path.write_text(analysis.model_dump_json(indent=2), encoding="utf-8")
+
+            accepted = sum(item.status == "accepted" for item in decisions)
+            rejected = sum(item.status == "rejected" for item in decisions)
+            self._update(
+                record,
+                status="analyzed",
+                stage="done",
+                message=(
+                    f"{analysis.score_label}: {analysis.score.total}% match. "
+                    f"Revalidated {len(decisions)} note(s): {accepted} accepted, {rejected} rejected."
+                ),
+                score=analysis.score.total,
+                profile_hash=ProfileService.hash(noted_profile),
+                notes=decisions,
+                notes_validated_revision=record.notes_revision,
+            )
+            logger.info(
+                "revalidation_completed",
+                extra={"application_id": application_id, "notes": len(decisions)},
+            )
+        except Exception:
+            logger.exception("revalidation_failed", extra={"application_id": application_id})
+            self._update(
+                record,
+                status="error",
+                stage="error",
+                message="Revalidation failed unexpectedly. Check the app logs for details.",
+                error="internal_error",
+            )
+
     def start_generation(self, application_id: str) -> ApplicationRecord:
         record = self.store.get(application_id)
         if record is None:
             raise ValueError("Application not found.")
         if record.status not in {"analyzed", "generated"}:
             raise ValueError("Analyze the job before generating a resume.")
+        if record.notes_revision != record.notes_validated_revision:
+            raise ValueError("Revalidate your evidence notes before generating.")
         logger.info("generation_started", extra={"application_id": application_id})
         self._update(
             record,
@@ -307,12 +464,11 @@ class ApplicationService:
             job = JobDescription.model_validate_json(
                 (directory / "job.json").read_text(encoding="utf-8")
             )
-            from app.models import AnalysisResult
-
             analysis = AnalysisResult.model_validate_json(
                 (directory / "analysis.json").read_text(encoding="utf-8")
             )
-            profile_path = directory / "profile.json"
+            noted_path = directory / "profile.noted.json"
+            profile_path = noted_path if noted_path.exists() else directory / "profile.json"
             if profile_path.exists():
                 profile = CandidateProfile.model_validate_json(
                     profile_path.read_text(encoding="utf-8")
@@ -403,6 +559,8 @@ class ApplicationService:
                 "validation": validation.model_dump(),
                 "ats": ats_report.model_dump(),
                 "pdf_error": pdf_error,
+                "notes_revision": record.notes_revision,
+                "evidence_sources": profile.provenance.model_dump(),
             }
             (directory / "metadata.json").write_text(
                 json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -478,6 +636,8 @@ class ApplicationService:
             "job",
             "analysis",
             "profile",
+            "profile.noted",
+            "notes",
             "ats_report",
             "validation",
             "resume",

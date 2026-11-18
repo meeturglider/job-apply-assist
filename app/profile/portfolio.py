@@ -14,6 +14,7 @@ from app.models import (
     Evidence,
     ExperienceEntry,
     Identity,
+    ProfileProvenance,
     ProjectEntry,
 )
 from app.profile.master_resume import parse_portfolio_date
@@ -170,10 +171,26 @@ def _certifications_from_person(person: dict[str, Any]) -> list[Certification]:
     return certifications
 
 
-def _add_skill_evidence(skills: dict[str, list[Evidence]], source: str, texts: list[str]) -> None:
+def _add_skill_evidence(
+    skills: dict[str, list[Evidence]],
+    source: str,
+    texts: list[str],
+    *,
+    origin: str = "portfolio",
+    origin_label: str = "Portfolio",
+    source_url: str = "",
+) -> None:
     for text in texts:
         for canonical, _ in lexicon.find(text):
-            skills.setdefault(canonical, []).append(Evidence(source=source, text=text))
+            skills.setdefault(canonical, []).append(
+                Evidence(
+                    source=source,
+                    text=text,
+                    origin=origin,  # type: ignore[arg-type]
+                    origin_label=origin_label,
+                    source_url=source_url,
+                )
+            )
 
 
 def person_profile_from_html(html: str, url: str) -> PortfolioSnapshot:
@@ -238,6 +255,10 @@ class PortfolioSnapshot:
         projects = _parse_projects(self.payload.get("projects", {}))
         person = self.payload.get("person", {})
         warnings = list(self.payload.get("warnings", []))
+        extra = self.payload.get("source_label") == "additional_url"
+        origin = "additional_url" if extra else "portfolio"
+        origin_label = "Additional URL" if extra else "Portfolio"
+        base_url = _text(self.payload.get("base_url"))
 
         skills: dict[str, list[Evidence]] = {}
         for exp in experience:
@@ -245,12 +266,18 @@ class PortfolioSnapshot:
                 skills,
                 f"portfolio / {exp.company} / {exp.role}",
                 [exp.summary, *exp.bullets, *exp.technologies],
+                origin=origin,
+                origin_label=origin_label,
+                source_url=base_url,
             )
         for project in projects:
             _add_skill_evidence(
                 skills,
                 f"portfolio / {project.name}",
                 [project.summary, *project.bullets, *project.technologies],
+                origin=origin,
+                origin_label=origin_label,
+                source_url=base_url,
             )
         knows_about = person.get("knowsAbout", [])
         for item in knows_about:
@@ -258,7 +285,13 @@ class PortfolioSnapshot:
             canonical = lexicon.canonicalize(value)
             if canonical:
                 skills.setdefault(canonical, []).append(
-                    Evidence(source="portfolio / schema.org", text=value)
+                    Evidence(
+                        source="portfolio / schema.org",
+                        text=value,
+                        origin=origin,  # type: ignore[arg-type]
+                        origin_label=origin_label,
+                        source_url=base_url,
+                    )
                 )
 
         awards = [_text(item) for item in person.get("award", []) if _text(item)]
@@ -278,6 +311,11 @@ class PortfolioSnapshot:
                 "portfolio_projects": _text(self.payload.get("projects_url")),
             },
             warnings=warnings,
+            provenance=ProfileProvenance(
+                portfolio_url=base_url,
+                portfolio_fetched_at=self.fetched_at.isoformat(),
+                warnings=warnings,
+            ),
         )
 
 

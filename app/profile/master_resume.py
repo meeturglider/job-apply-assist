@@ -10,6 +10,7 @@ from app.models import (
     EducationEntry,
     ExperienceEntry,
     Identity,
+    ProfileProvenance,
     ProjectEntry,
 )
 from app.skills import lexicon
@@ -332,7 +333,12 @@ def parse_master_resume(path: Path) -> CandidateProfile:
             from app.models import Evidence
 
             skills.setdefault(canonical, []).append(
-                Evidence(source="MASTER_RESUME.md", text=f"{category}: {item}")
+                Evidence(
+                    source="MASTER_RESUME.md",
+                    text=f"{category}: {item}",
+                    origin="resume",
+                    origin_label="Default resume",
+                )
             )
     for exp in experience:
         for tech in exp.technologies:
@@ -341,7 +347,12 @@ def parse_master_resume(path: Path) -> CandidateProfile:
                 from app.models import Evidence
 
                 skills.setdefault(canonical, []).append(
-                    Evidence(source=f"{exp.company} / {exp.role}", text=tech)
+                    Evidence(
+                        source=f"{exp.company} / {exp.role}",
+                        text=tech,
+                        origin="resume",
+                        origin_label="Default resume",
+                    )
                 )
 
     years = _years_of_experience(experience)
@@ -367,6 +378,10 @@ def parse_master_resume(path: Path) -> CandidateProfile:
         skill_categories={key: value for key, value in lexicon.categories.items()},
         sources={"master_resume": str(path)},
         warnings=warnings,
+        provenance=ProfileProvenance(
+            resume_kind="default",
+            resume_name=path.name,
+        ),
     )
 
 
@@ -398,6 +413,26 @@ def _years_of_experience(experience: list[ExperienceEntry]) -> float:
     return round((end - start).days / 365.25, 1)
 
 
+def tag_resume_origin(
+    profile: CandidateProfile, source: str, *, uploaded: bool
+) -> CandidateProfile:
+    profile.sources = {"master_resume": source}
+    profile.provenance.resume_kind = "uploaded" if uploaded else "default"
+    profile.provenance.resume_name = source
+    if not uploaded:
+        return profile
+    for items in profile.skills.values():
+        for item in items:
+            item.origin = "uploaded_resume"
+            item.origin_label = "Uploaded resume"
+            item.source = source
+    for exp in profile.experience:
+        exp.sources = [source]
+    for project in profile.projects:
+        project.sources = [source]
+    return profile
+
+
 def parse_master_resume_text(text: str, source: str = "MASTER_RESUME.md") -> CandidateProfile:
     import tempfile
 
@@ -406,8 +441,7 @@ def parse_master_resume_text(text: str, source: str = "MASTER_RESUME.md") -> Can
         temp_path = Path(handle.name)
     try:
         profile = parse_master_resume(temp_path)
-        profile.sources = {"master_resume": source}
-        return profile
+        return tag_resume_origin(profile, source, uploaded=True)
     finally:
         temp_path.unlink(missing_ok=True)
 

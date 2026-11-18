@@ -10,11 +10,48 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+EvidenceOrigin = Literal[
+    "resume", "uploaded_resume", "portfolio", "additional_url", "user_note", "derived"
+]
+
+
 class Evidence(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     source: str
     text: str
+    origin: EvidenceOrigin = "derived"
+    origin_label: str = ""
+    source_url: str = ""
+
+
+class ProfileProvenance(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    resume_kind: str = "default"
+    resume_name: str = ""
+    portfolio_url: str = ""
+    portfolio_cached: bool = False
+    portfolio_fetched_at: str = ""
+    extra_urls: list[str] = Field(default_factory=list)
+    evidence_counts: dict[str, int] = Field(default_factory=dict)
+    skill_counts: dict[str, int] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+
+
+def origin_for_source(source: str, default: EvidenceOrigin = "derived") -> EvidenceOrigin:
+    value = source.casefold()
+    if "user note" in value:
+        return "user_note"
+    if "|" in source or "additional:" in value:
+        return "additional_url"
+    if "portfolio" in value:
+        return "portfolio"
+    if "master_resume" in value:
+        return "resume"
+    if value.endswith(".md") or value.endswith(".txt") or value.endswith(".pdf"):
+        return "uploaded_resume"
+    return default
 
 
 class Identity(BaseModel):
@@ -91,6 +128,7 @@ class CandidateProfile(BaseModel):
     skill_categories: dict[str, list[str]] = Field(default_factory=dict)
     sources: dict[str, str] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    provenance: ProfileProvenance = Field(default_factory=ProfileProvenance)
     generated_at: datetime = Field(default_factory=utc_now)
 
     def all_evidence(self) -> list[Evidence]:
@@ -98,19 +136,31 @@ class CandidateProfile(BaseModel):
         for items in self.skills.values():
             evidence.extend(items)
         for exp in self.experience:
+            origin = origin_for_source(exp.sources[0] if exp.sources else exp.company, "derived")
             if exp.company:
-                evidence.append(Evidence(source=exp.company, text=exp.company))
+                evidence.append(Evidence(source=exp.company, text=exp.company, origin=origin))
             if exp.summary:
-                evidence.append(Evidence(source=exp.company, text=exp.summary))
-            evidence.extend(Evidence(source=exp.company, text=bullet) for bullet in exp.bullets)
-        for project in self.projects:
-            if project.summary:
-                evidence.append(Evidence(source=project.name, text=project.summary))
+                evidence.append(Evidence(source=exp.company, text=exp.summary, origin=origin))
             evidence.extend(
-                Evidence(source=project.name, text=bullet) for bullet in project.bullets
+                Evidence(source=exp.company, text=bullet, origin=origin) for bullet in exp.bullets
             )
-        evidence.extend(Evidence(source="certification", text=c.name) for c in self.certifications)
-        evidence.extend(Evidence(source="award", text=award) for award in self.awards)
+        for project in self.projects:
+            origin = origin_for_source(
+                project.sources[0] if project.sources else project.name, "derived"
+            )
+            if project.summary:
+                evidence.append(Evidence(source=project.name, text=project.summary, origin=origin))
+            evidence.extend(
+                Evidence(source=project.name, text=bullet, origin=origin)
+                for bullet in project.bullets
+            )
+        evidence.extend(
+            Evidence(source="certification", text=c.name, origin="derived")
+            for c in self.certifications
+        )
+        evidence.extend(
+            Evidence(source="award", text=award, origin="derived") for award in self.awards
+        )
         return evidence
 
 
@@ -164,6 +214,7 @@ class SkillMatch(BaseModel):
     note: str = ""
     requirement: str = ""
     explanation: str = ""
+    evidence_origins: dict[str, int] = Field(default_factory=dict)
 
 
 class ScoreBreakdown(BaseModel):
@@ -239,6 +290,9 @@ class AnalysisResult(BaseModel):
     keyword_suggestions: list[KeywordSuggestion] = Field(default_factory=list)
     recommendations: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    provenance: ProfileProvenance = Field(default_factory=ProfileProvenance)
+    keyword_sources: dict[str, list[str]] = Field(default_factory=dict)
+    keyword_origins: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class ResumeHeader(BaseModel):
@@ -359,6 +413,17 @@ class ArtifactInfo(BaseModel):
     size: int = 0
 
 
+class AnalysisNote(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    target: str
+    text: str
+    created_at: datetime = Field(default_factory=utc_now)
+    status: Literal["pending", "accepted", "rejected"] = "pending"
+    reason: str = ""
+    claim_flags: list[str] = Field(default_factory=list)
+
+
 class ApplicationRecord(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -377,6 +442,9 @@ class ApplicationRecord(BaseModel):
     model: str = ""
     artifacts: list[ArtifactInfo] = Field(default_factory=list)
     error: str = ""
+    notes: list[AnalysisNote] = Field(default_factory=list)
+    notes_revision: str = ""
+    notes_validated_revision: str = ""
 
     @property
     def progress_pct(self) -> int:
@@ -386,4 +454,13 @@ class ApplicationRecord(BaseModel):
             return 0
         if self.status == "generating":
             return {"tailoring": 35, "rendering": 75}.get(self.stage, 15)
-        return {"queued": 5, "fetching": 15, "matching": 40, "analyzing": 70}.get(self.stage, 5)
+        return {
+            "queued": 5,
+            "fetching": 15,
+            "matching": 40,
+            "notes": 60,
+            "extracting": 70,
+            "scoring": 85,
+            "suggestions": 95,
+            "analyzing": 70,
+        }.get(self.stage, 5)

@@ -79,7 +79,9 @@ function showProgress(mode, message = "Working...") {
   const labels =
     mode === "generation"
       ? ["Load analysis", "Build tailored resume", "Truthfulness check", "Render files"]
-      : ["Fetch job description", "Extract requirements", "Load profile", "Match evidence and score"];
+      : mode === "revalidation"
+        ? ["Apply notes", "Score evidence", "Refresh suggestions", "Finish"]
+        : ["Fetch job description", "Extract requirements", "Load profile", "Match evidence and score"];
   labels.forEach((label) => steps.appendChild(el("li", "", label)));
 }
 
@@ -93,7 +95,11 @@ function setProgress(record) {
     queued: 0,
     fetching: 0,
     matching: 2,
-    analyzing: 1,
+    notes: 2,
+    extracting: 1,
+    scoring: 3,
+    suggestions: 3,
+    analyzing: 3,
     tailoring: 1,
     rendering: 2,
     manual_paste: 0,
@@ -266,6 +272,179 @@ async function openApplication(applicationId, status) {
   refreshHistory();
 }
 
+const ORIGIN_LABELS = {
+  resume: "Default resume",
+  uploaded_resume: "Uploaded resume",
+  portfolio: "Portfolio",
+  additional_url: "Additional URL",
+  user_note: "User note",
+  derived: "Derived",
+};
+
+function originLabel(origin) {
+  return ORIGIN_LABELS[origin] || "Derived";
+}
+
+function evidenceOrigin(match) {
+  const first = (match.evidence || [])[0];
+  return first?.origin || "derived";
+}
+
+function currentNotes() {
+  return state.detail?.record?.notes || [];
+}
+
+function notesPending(record) {
+  return Boolean(record.notes_revision && record.notes_revision !== record.notes_validated_revision);
+}
+
+async function saveApplicationNotes(entries) {
+  const data = await api(`/api/applications/${state.currentId}/notes`, {
+    method: "PUT",
+    body: JSON.stringify({ notes: entries }),
+  });
+  state.detail.record = data.application;
+  renderAnalysis(state.detail);
+  showNotice(
+    notesPending(data.application)
+      ? "Evidence note saved. Revalidate before generating."
+      : "Evidence notes updated.",
+    "success",
+  );
+}
+
+function noteEditor(target) {
+  const wrapper = document.createElement("details");
+  wrapper.className = "note-editor";
+  wrapper.appendChild(el("summary", "", "Add evidence note"));
+  const body = el("div", "note-editor-body");
+  const existing = currentNotes().find((note) => note.target === target);
+  const textarea = document.createElement("textarea");
+  textarea.className = "note-input";
+  textarea.rows = 3;
+  textarea.placeholder = `What evidence supports "${target}" for this application?`;
+  textarea.value = existing?.text || "";
+  body.appendChild(textarea);
+
+  const status = el("div", "micro note-status");
+  if (existing) {
+    status.textContent = `Status: ${existing.status}${existing.reason ? ` · ${existing.reason}` : ""}`;
+  } else {
+    status.textContent = "Notes are saved for this application only.";
+  }
+  body.appendChild(status);
+
+  const save = el("button", "ghost-button", "Save evidence note");
+  save.type = "button";
+  save.addEventListener("click", async () => {
+    const text = textarea.value.trim();
+    if (text.length < 10) {
+      status.textContent = "Add at least 10 characters.";
+      return;
+    }
+    save.disabled = true;
+    try {
+      const entries = currentNotes()
+        .filter((note) => note.target !== target)
+        .map((note) => ({ target: note.target, text: note.text }));
+      entries.push({ target, text });
+      await saveApplicationNotes(entries);
+    } catch (error) {
+      status.textContent = error.message;
+      save.disabled = false;
+    }
+  });
+  body.appendChild(save);
+
+  if (existing) {
+    const remove = el("button", "ghost-button", "Remove note");
+    remove.type = "button";
+    remove.addEventListener("click", async () => {
+      remove.disabled = true;
+      try {
+        const entries = currentNotes()
+          .filter((note) => note.target !== target)
+          .map((note) => ({ target: note.target, text: note.text }));
+        await saveApplicationNotes(entries);
+      } catch (error) {
+        status.textContent = error.message;
+        remove.disabled = false;
+      }
+    });
+    body.appendChild(remove);
+  }
+  wrapper.appendChild(body);
+  return wrapper;
+}
+
+async function revalidateNotes() {
+  if (!state.currentId) return;
+  const button = $("revalidate-button");
+  button.disabled = true;
+  button.textContent = "Revalidating...";
+  try {
+    await api(`/api/applications/${state.currentId}/revalidate`, {
+      method: "POST",
+      body: "{}",
+    });
+    showProgress("revalidation", "Revalidating evidence notes...");
+    poll();
+  } catch (error) {
+    showNotice(error.message, "error");
+    button.disabled = false;
+    button.textContent = "Revalidate notes";
+  }
+}
+
+function renderProvenance(detail) {
+  const analysis = detail.analysis || {};
+  const profile = detail.profile || {};
+  const provenance = analysis.provenance || profile.provenance || {};
+  const counts = provenance.evidence_counts || {};
+  const chips = $("provenance-chips");
+  clear(chips);
+  Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([origin, count]) => {
+      chips.appendChild(el("span", `chip origin-${origin}`, `${originLabel(origin)}: ${count}`));
+    });
+  if (!chips.children.length) chips.appendChild(el("span", "micro", "No source breakdown available."));
+
+  const resume = provenance.resume_name || "resume";
+  const portfolio = provenance.portfolio_cached ? "portfolio loaded" : "portfolio unavailable";
+  $("provenance-summary").textContent = `${resume} · ${portfolio}`;
+
+  const details = $("provenance-detail-list");
+  clear(details);
+  const list = document.createElement("ul");
+  list.className = "recommendations";
+  Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([origin, count]) => {
+      list.appendChild(el("li", "", `${originLabel(origin)}: ${count} evidence item(s)`));
+    });
+  if (provenance.portfolio_url) {
+    list.appendChild(el("li", "", `Portfolio source: ${provenance.portfolio_url}`));
+  }
+  (provenance.extra_urls || []).forEach((url) => list.appendChild(el("li", "", `Additional source: ${url}`)));
+  details.appendChild(list);
+
+  const keywordSources = analysis.keyword_sources || {};
+  const keywordDetails = document.createElement("details");
+  keywordDetails.className = "evidence";
+  keywordDetails.appendChild(el("summary", "", "Per-keyword evidence support"));
+  const keywordList = document.createElement("ul");
+  keywordList.className = "recommendations";
+  Object.entries(keywordSources)
+    .slice(0, 40)
+    .forEach(([keyword, sources]) => {
+      const value = Array.isArray(sources) && sources.length ? sources.join("; ") : "No evidence found";
+      keywordList.appendChild(el("li", "", `${keyword}: ${value}`));
+    });
+  keywordDetails.appendChild(keywordList);
+  details.appendChild(keywordDetails);
+}
+
 function renderDetail(detail) {
   state.detail = detail;
   const record = detail.record;
@@ -334,14 +513,23 @@ function renderAnalysis(detail) {
   renderBreakdown(analysis);
   renderSkillLists(analysis);
   renderEvidence(analysis);
+  renderProvenance(detail);
   renderRecommendations(analysis, job);
   renderKeywords(analysis);
   renderWarnings([...(analysis.warnings || []), ...(job.warnings || [])]);
 
+  const pending = notesPending(record);
   const button = $("generate-button");
-  button.disabled = false;
-  button.textContent =
-    record.status === "generated" ? "Regenerate tailored resume" : "Generate tailored resume";
+  button.disabled = pending;
+  button.textContent = pending
+    ? "Revalidate notes to generate"
+    : record.status === "generated"
+      ? "Regenerate tailored resume"
+      : "Generate tailored resume";
+  const revalidate = $("revalidate-button");
+  revalidate.hidden = !pending;
+  revalidate.disabled = false;
+  revalidate.textContent = "Revalidate notes";
 }
 
 function renderBreakdown(analysis) {
@@ -428,7 +616,12 @@ function renderSkillLists(analysis) {
   if (!matched.length) matchedList.appendChild(el("div", "muted", "No direct matches found."));
   matched.forEach((match) => matchedList.appendChild(skillLine(match)));
   if (!gaps.length) gapList.appendChild(el("div", "muted", "No gaps detected."));
-  gaps.forEach((match) => gapList.appendChild(skillLine(match)));
+  gaps.forEach((match) => {
+    gapList.appendChild(skillLine(match));
+    const note = currentNotes().find((item) => item.target === match.skill);
+    if (note) gapList.appendChild(el("div", "micro note-status", `${note.status}: ${note.reason}`));
+    gapList.appendChild(noteEditor(match.skill));
+  });
 }
 
 function renderEvidence(analysis) {
@@ -441,6 +634,9 @@ function renderEvidence(analysis) {
     const summary = document.createElement("summary");
     summary.appendChild(el("span", "", match.skill));
     summary.appendChild(el("span", `chip ${match.status}`, match.evidence_class || match.status));
+    summary.appendChild(
+      el("span", `origin-badge origin-${evidenceOrigin(match)}`, originLabel(evidenceOrigin(match))),
+    );
     details.appendChild(summary);
     const body = el("div", "evidence-body");
     match.evidence.forEach((evidence) => {
@@ -474,8 +670,16 @@ function renderKeywords(analysis) {
   entries
     .sort((a, b) => Number(a[1]) - Number(b[1]))
     .forEach(([keyword, present]) => {
-      const chip = el("span", `keyword ${present ? "present" : ""}`, keyword);
-      chip.title = present ? "Found in your profile evidence" : "Not found in your profile evidence";
+      const sources = (analysis.keyword_sources || {})[keyword] || [];
+      const origins = (analysis.keyword_origins || {})[keyword] || [];
+      const chip = el(
+        "span",
+        `keyword ${present ? "present" : ""} ${origins.length ? `origin-${origins[0]}` : ""}`,
+        keyword,
+      );
+      chip.title = sources.length
+        ? `Supported by: ${sources.join("; ")}`
+        : "No evidence found in your profile or portfolio.";
       wrap.appendChild(chip);
     });
   if (!entries.length) wrap.appendChild(el("div", "muted", "No keywords detected."));
@@ -489,6 +693,8 @@ function renderKeywords(analysis) {
     box.appendChild(el("div", "", item.suggestion));
     if (item.evidence) box.appendChild(el("span", "micro", `Evidence: ${item.evidence}`));
     else if (item.source) box.appendChild(el("span", "micro", `Based on ${item.source}`));
+    box.appendChild(el("div", "micro", "No supporting evidence found; this is not proof the skill is absent."));
+    box.appendChild(noteEditor(item.keyword));
     suggestions.appendChild(box);
   });
 }
@@ -514,7 +720,12 @@ function renderGenerated(detail) {
   const usedLlm = String(metadata.method || "").startsWith("llm");
   const method = usedLlm ? "LLM-tailored" : "Deterministic";
   const model = metadata.model && usedLlm ? ` · ${metadata.model}` : "";
-  $("generation-method").textContent = `${method}${model}`;
+  const sourceCounts = metadata.evidence_sources?.evidence_counts || {};
+  const sourceMix = Object.entries(sourceCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([origin, count]) => `${originLabel(origin)} ${count}`)
+    .join(" · ");
+  $("generation-method").textContent = `${method}${model}${sourceMix ? ` · ${sourceMix}` : ""}`;
   const downloads = $("downloads");
   clear(downloads);
   const labels = { pdf: "Download PDF", docx: "Download DOCX", markdown: "Markdown", html: "HTML" };
@@ -706,6 +917,7 @@ async function poll() {
 
 $("analyze-form").addEventListener("submit", submitAnalysis);
 $("generate-button").addEventListener("click", generateResume);
+$("revalidate-button").addEventListener("click", revalidateNotes);
 $("refresh-profile").addEventListener("click", refreshProfile);
 $("upload-resume").addEventListener("click", uploadResume);
 $("reset-resume").addEventListener("click", resetResume);

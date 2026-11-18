@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
-from app.models import ArtifactInfo
+from app.models import ApplicationRecord, ArtifactInfo
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -90,6 +90,15 @@ def test_api_errors_include_codes_and_request_ids(tmp_path: Path) -> None:
         assert oversized.json()["code"] == "validation_error"
 
 
+def test_progress_percentage_tracks_analysis_substages() -> None:
+    record = ApplicationRecord(id="progress", status="analyzing", stage="extracting")
+    assert record.progress_pct == 70
+    assert record.model_copy(update={"stage": "scoring"}).progress_pct == 85
+    assert record.model_copy(update={"stage": "suggestions"}).progress_pct == 95
+    assert record.model_copy(update={"stage": "notes"}).progress_pct == 60
+    assert record.model_copy(update={"status": "analyzed", "stage": "done"}).progress_pct == 100
+
+
 def test_status_includes_progress_percentage(tmp_path: Path) -> None:
     app = create_app(_settings(tmp_path))
     service = app.state.service
@@ -110,6 +119,40 @@ def test_status_includes_progress_percentage(tmp_path: Path) -> None:
     record.status = "generated"
     record.stage = "done"
     assert record.progress_pct == 100
+
+
+def test_notes_endpoint_validates_and_blocks_generation(tmp_path: Path) -> None:
+    app = create_app(_settings(tmp_path))
+    service = app.state.service
+    record = service._new_record("Acme", "Platform Engineer", "")
+    service._update(record, status="analyzed", stage="done")
+
+    with TestClient(app) as client:
+        url = f"/api/applications/{record.id}"
+        invalid = client.put(
+            f"{url}/notes", json={"notes": [{"target": "Ansible", "text": "too short"}]}
+        )
+        assert invalid.status_code == 422
+        assert invalid.json()["code"] == "validation_error"
+
+        valid = client.put(
+            f"{url}/notes",
+            json={
+                "notes": [
+                    {
+                        "target": "Ansible",
+                        "text": "I used Ansible for configuration and deployment automation.",
+                    }
+                ]
+            },
+        )
+        assert valid.status_code == 200
+        application = valid.json()["application"]
+        assert application["notes_revision"]
+        assert application["notes_validated_revision"] == ""
+
+        assert client.post(f"{url}/generate", json={}).status_code == 409
+        assert client.post(f"{url}/revalidate", json={}).status_code == 409
 
 
 def test_unhandled_errors_do_not_leak_internal_details(tmp_path: Path) -> None:

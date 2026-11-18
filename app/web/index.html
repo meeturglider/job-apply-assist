@@ -169,6 +169,18 @@
           <div id="evidence-list" class="evidence-list"></div>
         </div>
 
+        <div class="panel" id="provenance-panel">
+          <div class="panel-heading">
+            <h3>Evidence sources</h3>
+            <span class="micro" id="provenance-summary">Resume and portfolio</span>
+          </div>
+          <div class="chip-row" id="provenance-chips"></div>
+          <details class="evidence" id="provenance-details">
+            <summary>Source details</summary>
+            <div id="provenance-detail-list"></div>
+          </details>
+        </div>
+
         <div class="two-column">
           <div class="panel">
             <div class="panel-heading">
@@ -196,6 +208,7 @@
             <h3>Ready to proceed?</h3>
             <p class="muted">The generator only uses facts already present in your resume and portfolio. Missing skills stay missing.</p>
           </div>
+          <button class="ghost-button" id="revalidate-button" type="button" hidden>Revalidate notes</button>
           <button class="primary-button" id="generate-button" type="button">Generate tailored resume</button>
         </div>
 

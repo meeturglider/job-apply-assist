@@ -41,6 +41,15 @@ class ResumeUploadRequest(BaseModel):
     filename: str = Field(default="uploaded_resume.md", max_length=200)
 
 
+class NoteInput(BaseModel):
+    target: str = Field(min_length=1, max_length=120)
+    text: str = Field(min_length=10, max_length=2000)
+
+
+class NotesRequest(BaseModel):
+    notes: list[NoteInput] = Field(default_factory=list, max_length=25)
+
+
 def _configure_logging(level: str) -> None:
     root = logging.getLogger()
     if not root.handlers:
@@ -108,6 +117,24 @@ def _clean_profile_urls(values: list[str]) -> list[str]:
             raise HTTPException(status_code=422, detail=f"Invalid profile URL: {exc}") from exc
         if url not in cleaned:
             cleaned.append(url)
+    return cleaned
+
+
+def _clean_notes(values: list[NoteInput]) -> list[dict[str, str]]:
+    cleaned: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in values:
+        target = " ".join(item.target.split())[:120]
+        text = " ".join(item.text.split())[:2000]
+        if len(target) < 1 or len(text) < 10:
+            raise HTTPException(
+                status_code=422, detail="Each note needs a target and at least 10 characters."
+            )
+        marker = (target.casefold(), text.casefold())
+        if marker in seen:
+            continue
+        seen.add(marker)
+        cleaned.append({"target": target, "text": text})
     return cleaned
 
 
@@ -375,6 +402,27 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             return service.analysis_payload(application_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.put("/api/applications/{application_id}/notes")
+    async def save_notes(application_id: str, request: NotesRequest) -> dict[str, object]:
+        try:
+            record = service.save_notes(application_id, _clean_notes(request.notes))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"application": record.model_dump(mode="json")}
+
+    @app.post("/api/applications/{application_id}/revalidate")
+    async def revalidate(application_id: str) -> dict[str, object]:
+        try:
+            record = service.start_revalidation(application_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "application": {
+                **record.model_dump(mode="json"),
+                "progress_pct": record.progress_pct,
+            }
+        }
 
     @app.post("/api/applications/{application_id}/generate")
     async def generate(application_id: str) -> dict[str, object]:

@@ -94,6 +94,10 @@ async def test_uploaded_resume_is_used_for_analysis_and_generation(
         assert await _wait(service, record.id, {"analyzed"}) == "analyzed"
         profile = service.analysis_payload(record.id)["profile"]
         assert profile["identity"]["name"] == "Uploaded Candidate"
+        assert profile["provenance"]["resume_kind"] == "uploaded"
+        assert profile["provenance"]["evidence_counts"].get("uploaded_resume", 0) > 0
+        analysis = service.analysis_payload(record.id)["analysis"]
+        assert analysis["provenance"]["resume_kind"] == "uploaded"
 
         service.start_generation(record.id)
         assert await _wait(service, record.id, {"generated"}) == "generated"
@@ -145,6 +149,8 @@ async def test_additional_profile_url_is_merged_for_analysis(
         profile = payload_after["profile"]
         assert any(entry["company"] == "Extra Corp" for entry in profile["experience"])
         assert "Ansible" in profile["skills"]
+        assert profile["provenance"]["extra_urls"] == [url]
+        assert profile["provenance"]["evidence_counts"].get("additional_url", 0) > 0
 
         service.start_generation(record.id)
         assert await _wait(service, record.id, {"generated"}) == "generated"
