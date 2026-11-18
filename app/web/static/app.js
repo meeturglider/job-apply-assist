@@ -6,6 +6,7 @@ const state = {
   portalMode: false,
   allowRegistration: false,
   authMode: "login",
+  profileReady: false,
   csrf: "",
   accountEmail: "",
 };
@@ -133,6 +134,17 @@ function stopPolling() {
   }
 }
 
+function updateProfileStatus(profile) {
+  const ps = $("profile-status");
+  state.profileReady = Boolean(profile.uploaded_resume || profile.master_resume_exists);
+  ps.textContent = profile.uploaded_resume
+    ? "Uploaded resume active"
+    : profile.master_resume_exists
+      ? "Profile source ready"
+      : "Resume source missing";
+  ps.className = `pill ${state.profileReady ? "" : "warning"}`;
+}
+
 async function refreshHealth() {
   try {
     const health = await api("/api/health");
@@ -141,14 +153,11 @@ async function refreshHealth() {
       ? `${health.llm_model} ready`
       : "Deterministic mode";
     llm.className = `pill ${health.llm_available ? "success" : "warning"}`;
-    const profile = health.profile;
-    const ps = $("profile-status");
-    ps.textContent = profile.uploaded_resume
-      ? "Uploaded resume active"
-      : profile.master_resume_exists
-        ? "Profile source ready"
-        : "Resume source missing";
-    ps.className = `pill ${profile.master_resume_exists ? "" : "warning"}`;
+    const profile =
+      state.portalMode && state.accountEmail
+        ? await api("/api/profile/status")
+        : health.profile;
+    updateProfileStatus(profile);
   } catch (error) {
     $("llm-status").textContent = "Health check failed";
     $("llm-status").className = "pill warning";
@@ -202,6 +211,7 @@ async function uploadResume() {
       `Resume uploaded: ${profile.experience_count} roles, ${profile.skill_count} skills.`,
       "success",
     );
+    if (profile.status) updateProfileStatus(profile.status);
     await refreshHealth();
   } catch (error) {
     showNotice(error.message, "error");
@@ -881,6 +891,10 @@ async function submitAnalysis(event) {
     setFormError("Provide a job URL or paste the job description.");
     return;
   }
+  if (state.portalMode && !state.profileReady) {
+    setFormError("Upload a resume before analyzing a job.");
+    return;
+  }
   const button = $("analyze-button");
   button.disabled = true;
   button.textContent = "Starting...";
@@ -1179,6 +1193,9 @@ $("generate-button").addEventListener("click", generateResume);
 $("revalidate-button").addEventListener("click", revalidateNotes);
 $("refresh-profile").addEventListener("click", refreshProfile);
 $("upload-resume").addEventListener("click", uploadResume);
+$("resume-file").addEventListener("change", () => {
+  if ($("resume-file").files && $("resume-file").files.length) uploadResume();
+});
 $("reset-resume").addEventListener("click", resetResume);
 $("clear-resume").addEventListener("click", clearResume);
 $("tracker-status").addEventListener("change", setTrackerStatus);

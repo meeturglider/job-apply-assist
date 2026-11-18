@@ -312,7 +312,7 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         auth_free = (
             path.startswith("/api/auth/")
             or path.startswith("/static/")
-            or path in {"/", "/api/health"}
+            or path in {"/", "/api/health", "/favicon.ico"}
         )
         if portal_mode and sessions is not None:
             sessions.prune()
@@ -590,6 +590,11 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=422, detail="Provide a job URL or paste the job description."
             )
+        profile_status = _workspace(request).profiles.status()
+        if not profile_status.get("uploaded_resume") and not profile_status.get(
+            "master_resume_exists"
+        ):
+            raise HTTPException(status_code=422, detail="Upload a resume before analyzing a job.")
         record = _workspace(request).start_analysis(
             url=payload.url.strip(),
             text=payload.text.strip(),

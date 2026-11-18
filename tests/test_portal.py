@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -69,6 +70,52 @@ def test_portal_sessions_are_isolated_and_do_not_write_candidate_data(
         assert not (data_dir / "applications").exists()
         assert not (data_dir / "profile").exists()
         assert sorted(item.name for item in data_dir.iterdir()) == ["accounts.db"]
+
+
+def test_portal_profile_status_is_session_scoped_and_analysis_requires_resume(
+    tmp_path: Path, master_text: str
+) -> None:
+    app = create_app(_portal_settings(tmp_path, master_text))
+    with TestClient(app) as first, TestClient(app) as second:
+        first_headers = _register(first, "profile-first@example.com")
+        second_headers = _register(second, "profile-second@example.com")
+        assert first.get("/api/profile/status").json()["uploaded_resume"] is False
+        assert second.get("/api/profile/status").json()["uploaded_resume"] is False
+
+        blocked = second.post(
+            "/api/analyze",
+            json={"text": "Python engineer needed with cloud experience. " * 5},
+            headers=second_headers,
+        )
+        assert blocked.status_code == 422
+        assert "Upload a resume" in blocked.json()["detail"]
+
+        uploaded = first.post(
+            "/api/profile/resume",
+            json={"text": master_text, "filename": "resume.md"},
+            headers=first_headers,
+        )
+        assert uploaded.status_code == 200
+        assert uploaded.json()["status"]["uploaded_resume"] is True
+        assert first.get("/api/profile/status").json()["uploaded_resume"] is True
+        assert second.get("/api/profile/status").json()["uploaded_resume"] is False
+
+        analyzed = first.post(
+            "/api/analyze",
+            json={"text": "Python engineer needed with cloud experience. " * 5},
+            headers=first_headers,
+        )
+        assert analyzed.status_code == 200
+        application_id = analyzed.json()["application"]["id"]
+        status = ""
+        for _ in range(200):
+            status = first.get(f"/api/applications/{application_id}/status").json()["application"][
+                "status"
+            ]
+            if status in {"analyzed", "error", "needs_paste"}:
+                break
+            time.sleep(0.02)
+        assert status == "analyzed"
 
 
 def test_portal_requires_csrf_for_unsafe_requests(tmp_path: Path, master_text: str) -> None:

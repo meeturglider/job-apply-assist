@@ -264,7 +264,7 @@ mypy app
 pytest -q
 ```
 
-Result at the time of this report: **84 tests passed**, Ruff clean, mypy clean. The only test
+Result at the time of this report: **85 tests passed**, Ruff clean, mypy clean. The only test
 warning is Starlette's upstream `TestClient`/`httpx` deprecation notice.
 
 Coverage includes scoring separation, evidence classes, dimension matching, education and
@@ -274,9 +274,9 @@ verification, award merge/deduplication, resume upload/reset, per-analysis profi
 merging, parent-company entity matching, grounded semantic keyword suggestions, LLM
 suggestion rejection/fallback behavior, shared-password gating, per-client rate limiting,
 proxy-aware rate-limit keys, an end-to-end deterministic analyze/generate flow, portal
-registration/login, session isolation, CSRF enforcement, session-only storage, contact
-extraction, outreach drafting, tracker updates, prefill payloads, and portal UI/extension
-controls.
+registration/login, session isolation, CSRF enforcement, session-only storage, session-scoped
+profile status, resume-before-analysis gating, contact extraction, outreach drafting, tracker
+updates, prefill payloads, and portal UI/extension controls.
 
 Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio JSON:
 

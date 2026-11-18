@@ -66,7 +66,8 @@ session, or restarting the server clears that workspace.
 
 The portal UI adds:
 
-- per-session resume upload and profile indicator;
+- per-session resume upload and profile indicator; selecting a resume file uploads it
+  immediately and the indicator tracks that session's workspace;
 - a tracker for draft, analyzed, email drafted, prefilled, and submitted states;
 - public contact extraction from job JSON-LD, `mailto:` links, and page text;
 - a deterministic, evidence-grounded outreach draft plus a `mailto:` link;
