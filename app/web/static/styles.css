@@ -1155,3 +1155,55 @@ details.evidence[open] summary::before {
   margin-top: -2px;
   line-height: 1.5;
 }
+
+[hidden] {
+  display: none !important;
+}
+
+.auth-card {
+  max-width: 460px;
+  margin: 80px auto;
+  padding: 28px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: rgba(12, 20, 36, 0.94);
+}
+
+.auth-card h2 {
+  font-size: 20px;
+}
+
+.auth-card .field {
+  margin-top: 14px;
+}
+
+.link-button {
+  margin-top: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+#apply-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#apply-panel .ghost-button {
+  width: auto;
+  align-self: flex-start;
+}
+
+#apply-panel textarea {
+  min-height: 90px;
+}
+
+#mailto-link {
+  text-decoration: none;
+}

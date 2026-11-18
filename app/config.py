@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     shared_password: str = ""
     rate_limit_per_minute: int = Field(default=30, ge=0, le=600)
     trust_proxy_headers: bool = False
+    portal_mode: bool = False
+    allow_registration: bool = True
+    session_ttl_minutes: int = Field(default=480, ge=5, le=10080)
+    session_cookie_secure: bool = False
 
     llm_provider: str = "ollama"
     ollama_base_url: str = "http://localhost:11434"
@@ -52,6 +56,10 @@ class Settings(BaseSettings):
     @property
     def database_path(self) -> Path:
         return self.data_dir / "applications.db"
+
+    @property
+    def accounts_path(self) -> Path:
+        return self.data_dir / "accounts.db"
 
     @staticmethod
     def _secure_directory(path: Path) -> None:

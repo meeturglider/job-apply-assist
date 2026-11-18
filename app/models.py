@@ -175,6 +175,42 @@ class Requirement(BaseModel):
     dimension: str = "technical"
 
 
+class ContactCandidate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    email: str
+    name: str = ""
+    source: str
+    confidence: float = 0
+    confirmed: bool = False
+
+
+class EmailDraft(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    to: str
+    subject: str
+    body: str
+    generated_at: datetime = Field(default_factory=utc_now)
+    source: str = "deterministic"
+
+
+class PrefillFields(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    linkedin: str = ""
+    github: str = ""
+    portfolio: str = ""
+    role: str = ""
+    company: str = ""
+    location: str = ""
+    experience_years: float = 0
+    skills: list[str] = Field(default_factory=list)
+
+
 class JobDescription(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -199,6 +235,7 @@ class JobDescription(BaseModel):
     extraction_fallback_reason: str = ""
     llm_attempts: int = 0
     warnings: list[str] = Field(default_factory=list)
+    contacts: list[ContactCandidate] = Field(default_factory=list)
 
 
 class SkillMatch(BaseModel):
@@ -424,6 +461,9 @@ class AnalysisNote(BaseModel):
     claim_flags: list[str] = Field(default_factory=list)
 
 
+TrackerStatus = Literal["draft", "analyzed", "email_drafted", "prefilled", "submitted"]
+
+
 class ApplicationRecord(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -445,6 +485,11 @@ class ApplicationRecord(BaseModel):
     notes: list[AnalysisNote] = Field(default_factory=list)
     notes_revision: str = ""
     notes_validated_revision: str = ""
+    contacts: list[ContactCandidate] = Field(default_factory=list)
+    selected_contact: str = ""
+    email_draft: EmailDraft | None = None
+    tracker_status: TrackerStatus = "draft"
+    prefill_count: int = 0
 
     @property
     def progress_pct(self) -> int:

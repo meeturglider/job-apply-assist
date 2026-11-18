@@ -10,18 +10,28 @@ import uuid
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.artifacts import MemoryArtifactStore
+from app.auth import (
+    CSRF_HEADER,
+    AccountStore,
+    SessionManager,
+    clear_session_cookies,
+    set_session_cookies,
+)
 from app.config import Settings, settings
 from app.jd.fetcher import FetchError, validate_url
+from app.profile.memory_service import MemoryProfileService
 from app.service import ApplicationService
+from app.store import MemoryApplicationStore
 
 WEB_DIR = Path(__file__).parent / "web"
 STATIC_DIR = WEB_DIR / "static"
@@ -48,6 +58,47 @@ class NoteInput(BaseModel):
 
 class NotesRequest(BaseModel):
     notes: list[NoteInput] = Field(default_factory=list, max_length=25)
+
+
+class AccountRequest(BaseModel):
+    email: str
+    password: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        email = value.strip()
+        if (
+            len(email) < 3
+            or len(email) > 320
+            or "@" not in email
+            or email.startswith("@")
+            or email.endswith("@")
+            or any(character.isspace() for character in email)
+        ):
+            raise ValueError("Enter a valid email address.")
+        return email
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        if len(value) < 8 or len(value) > 200:
+            raise ValueError("Use a password of at least 8 characters.")
+        return value
+
+
+class ContactRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    name: str = Field(default="", max_length=120)
+
+
+class OutreachRequest(BaseModel):
+    contact_email: str = Field(default="", max_length=320)
+    user_note: str = Field(default="", max_length=1000)
+
+
+class TrackerRequest(BaseModel):
+    status: Literal["draft", "analyzed", "email_drafted", "prefilled", "submitted"]
 
 
 def _configure_logging(level: str) -> None:
@@ -98,6 +149,7 @@ def _client_key(request: Request, trust_proxy_headers: bool) -> str:
 def _error_code(status_code: int) -> str:
     return {
         401: "unauthorized",
+        403: "forbidden",
         404: "not_found",
         409: "conflict",
         413: "payload_too_large",
@@ -167,8 +219,33 @@ def _error_response(
 def create_app(custom_settings: Settings | None = None) -> FastAPI:
     active_settings = custom_settings or settings
     _configure_logging(active_settings.log_level)
-    active_settings.ensure_dirs()
-    service = ApplicationService(active_settings)
+    portal_mode = active_settings.portal_mode
+    if portal_mode:
+        active_settings.data_dir.mkdir(parents=True, exist_ok=True)
+        accounts = AccountStore(active_settings.accounts_path)
+        sessions = SessionManager(active_settings.session_ttl_minutes)
+    else:
+        active_settings.ensure_dirs()
+        accounts = None
+        sessions = None
+
+    def _new_workspace() -> ApplicationService:
+        return ApplicationService(
+            active_settings,
+            store=MemoryApplicationStore(),
+            profiles=MemoryProfileService(active_settings),
+            artifacts=MemoryArtifactStore(),
+        )
+
+    service = _new_workspace() if portal_mode else ApplicationService(active_settings)
+
+    def _workspace(request: Request) -> ApplicationService:
+        if not portal_mode or sessions is None:
+            return service
+        session = getattr(request.state, "session", None)
+        if session is None or session.workspace is None:
+            raise HTTPException(status_code=401, detail="Sign in to continue.")
+        return session.workspace
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -177,12 +254,18 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             extra={
                 "llm_provider": active_settings.llm_provider,
                 "llm_model": active_settings.ollama_model,
+                "portal_mode": portal_mode,
             },
         )
         try:
             yield
         finally:
             await service.shutdown()
+            if sessions is not None:
+                for session in sessions.all():
+                    workspace = session.workspace
+                    if workspace is not None:
+                        await workspace.shutdown()
 
     app = FastAPI(
         title="Job Apply Assist",
@@ -192,14 +275,23 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
     )
     app.state.service = service
     app.state.settings = active_settings
+    app.state.accounts = accounts
+    app.state.sessions = sessions
     rate_windows: dict[str, deque[float]] = {}
     rate_lock = asyncio.Lock()
 
     async def _rate_limited(request: Request) -> bool:
         limit = active_settings.rate_limit_per_minute
-        if limit <= 0 or request.method != "POST" or not request.url.path.startswith("/api/"):
+        unsafe = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        if limit <= 0 or not unsafe or not request.url.path.startswith("/api/"):
             return False
-        key = _client_key(request, active_settings.trust_proxy_headers)
+        session = getattr(request.state, "session", None)
+        if portal_mode and session is not None:
+            key = f"user:{session.user_id}"
+        elif portal_mode:
+            key = f"ip:{_client_key(request, active_settings.trust_proxy_headers)}"
+        else:
+            key = _client_key(request, active_settings.trust_proxy_headers)
         now = time.monotonic()
         async with rate_lock:
             window = rate_windows.setdefault(key, deque())
@@ -213,14 +305,40 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def request_context(request: Request, call_next):
         request.state.request_id = _request_id(request)
+        request.state.session = None
+        request.state.principal = None
         started = time.perf_counter()
+        path = request.url.path
+        auth_free = (
+            path.startswith("/api/auth/")
+            or path.startswith("/static/")
+            or path in {"/", "/api/health"}
+        )
+        if portal_mode and sessions is not None:
+            sessions.prune()
+            session = SessionManager.from_request(request, sessions)
+            request.state.session = session
+            if session is not None:
+                request.state.principal = session.user_id
         password = active_settings.shared_password.strip()
-        if password and not _basic_auth_valid(request, password):
+        if portal_mode and sessions is not None and not auth_free and request.state.session is None:
+            response = _error_response(request, 401, "Sign in to continue.")
+        elif (
+            portal_mode
+            and request.state.session is not None
+            and not auth_free
+            and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+            and not secrets.compare_digest(
+                request.headers.get(CSRF_HEADER, ""), request.state.session.csrf_token
+            )
+        ):
+            response = _error_response(request, 403, "Invalid CSRF token.")
+        elif not portal_mode and password and not _basic_auth_valid(request, password):
             logger.warning(
                 "auth_rejected",
                 extra={
                     "request_id": request.state.request_id,
-                    "path": request.url.path,
+                    "path": path,
                 },
             )
             response = _error_response(
@@ -237,7 +355,7 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
                 extra={
                     "request_id": request.state.request_id,
                     "method": request.method,
-                    "path": request.url.path,
+                    "path": path,
                 },
             )
             response = _error_response(
@@ -255,7 +373,7 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
                     extra={
                         "request_id": request.state.request_id,
                         "method": request.method,
-                        "path": request.url.path,
+                        "path": path,
                     },
                 )
                 raise
@@ -285,14 +403,18 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        errors = [
-            {
-                "loc": [str(part) for part in error.get("loc", [])],
-                "msg": str(error.get("msg", "Invalid value.")),
-                "type": str(error.get("type", "invalid")),
-            }
-            for error in exc.errors()
-        ]
+        errors = []
+        for error in exc.errors():
+            message = str(error.get("msg", "Invalid value."))
+            if message.startswith("Value error, "):
+                message = message.removeprefix("Value error, ")
+            errors.append(
+                {
+                    "loc": [str(part) for part in error.get("loc", [])],
+                    "msg": message,
+                    "type": str(error.get("type", "invalid")),
+                }
+            )
         return JSONResponse(
             status_code=422,
             content=_error_payload(
@@ -328,6 +450,84 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
     async def index() -> FileResponse:
         return FileResponse(WEB_DIR / "index.html")
 
+    def _require_portal() -> None:
+        if not portal_mode or accounts is None or sessions is None:
+            raise HTTPException(status_code=404, detail="Portal accounts are disabled.")
+
+    @app.get("/api/auth/config")
+    async def auth_config() -> dict[str, object]:
+        return {
+            "portal_mode": portal_mode,
+            "allow_registration": active_settings.allow_registration,
+        }
+
+    @app.post("/api/auth/register")
+    async def register(payload: AccountRequest, response: Response) -> dict[str, object]:
+        _require_portal()
+        assert accounts is not None and sessions is not None
+        if not active_settings.allow_registration:
+            raise HTTPException(status_code=403, detail="Registration is disabled.")
+        account = accounts.create(payload.email, payload.password)
+        if account is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Use a valid email and a password of at least 8 characters.",
+            )
+        session = sessions.create(account, _new_workspace())
+        set_session_cookies(
+            response,
+            session,
+            secure=active_settings.session_cookie_secure,
+            max_age=active_settings.session_ttl_minutes * 60,
+        )
+        return {
+            "account": {"email": account.email},
+            "csrf_token": session.csrf_token,
+            "session_only": True,
+        }
+
+    @app.post("/api/auth/login")
+    async def login(payload: AccountRequest, response: Response) -> dict[str, object]:
+        _require_portal()
+        assert accounts is not None and sessions is not None
+        account = accounts.authenticate(payload.email, payload.password)
+        if account is None:
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+        session = sessions.create(account, _new_workspace())
+        set_session_cookies(
+            response,
+            session,
+            secure=active_settings.session_cookie_secure,
+            max_age=active_settings.session_ttl_minutes * 60,
+        )
+        return {
+            "account": {"email": account.email},
+            "csrf_token": session.csrf_token,
+            "session_only": True,
+        }
+
+    @app.post("/api/auth/logout")
+    async def logout(request: Request, response: Response) -> dict[str, object]:
+        _require_portal()
+        assert sessions is not None
+        session = request.state.session
+        if session is not None:
+            sessions.delete(session.id)
+        clear_session_cookies(response, secure=active_settings.session_cookie_secure)
+        return {"ok": True}
+
+    @app.get("/api/auth/me")
+    async def me(request: Request) -> dict[str, object]:
+        _require_portal()
+        session = request.state.session
+        if session is None:
+            raise HTTPException(status_code=401, detail="Sign in to continue.")
+        return {
+            "account": {"email": session.email},
+            "session_only": True,
+            "csrf_token": session.csrf_token,
+        }
+
     @app.get("/api/health")
     async def health() -> dict[str, object]:
         llm_available = await service.llm.available()
@@ -340,53 +540,73 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         }
 
     @app.get("/api/profile/status")
-    async def profile_status() -> dict[str, object]:
-        return service.profiles.status()
+    async def profile_status(request: Request) -> dict[str, object]:
+        return _workspace(request).profiles.status()
 
     @app.post("/api/profile/refresh")
-    async def profile_refresh() -> dict[str, object]:
-        profile = await service.profiles.load(refresh=True)
-        summary = service.profiles.summary(profile)
+    async def profile_refresh(request: Request) -> dict[str, object]:
+        workspace = _workspace(request)
+        profile = await workspace.profiles.load(refresh=True)
+        summary = workspace.profiles.summary(profile)
         return {**summary, "profile": summary}
 
     @app.post("/api/profile/resume")
-    async def resume_upload(request: ResumeUploadRequest) -> dict[str, object]:
+    async def resume_upload(request: Request, payload: ResumeUploadRequest) -> dict[str, object]:
+        workspace = _workspace(request)
         try:
-            profile = service.profiles.upload_resume(request.text, request.filename)
+            profile = workspace.profiles.upload_resume(payload.text, payload.filename)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        summary = service.profiles.summary(profile)
-        return {**summary, "profile": summary, "status": service.profiles.status()}
+        summary = workspace.profiles.summary(profile)
+        return {**summary, "profile": summary, "status": workspace.profiles.status()}
 
     @app.post("/api/profile/resume/reset")
-    async def resume_reset() -> dict[str, object]:
-        service.profiles.reset_resume()
-        profile = await service.profiles.load()
-        summary = service.profiles.summary(profile)
-        return {**summary, "profile": summary, "status": service.profiles.status()}
+    async def resume_reset(request: Request) -> dict[str, object]:
+        workspace = _workspace(request)
+        workspace.profiles.reset_resume()
+        if portal_mode:
+            return {
+                "identity": {},
+                "experience_count": 0,
+                "project_count": 0,
+                "skill_count": 0,
+                "certification_count": 0,
+                "award_count": 0,
+                "warnings": [],
+                "sources": {},
+                "provenance": {},
+                "status": workspace.profiles.status(),
+            }
+        try:
+            profile = await workspace.profiles.load()
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        summary = workspace.profiles.summary(profile)
+        return {**summary, "profile": summary, "status": workspace.profiles.status()}
 
     @app.post("/api/analyze")
-    async def analyze(request: AnalyzeRequest) -> dict[str, object]:
-        if not request.url.strip() and not request.text.strip():
+    async def analyze(request: Request, payload: AnalyzeRequest) -> dict[str, object]:
+        if not payload.url.strip() and not payload.text.strip():
             raise HTTPException(
                 status_code=422, detail="Provide a job URL or paste the job description."
             )
-        record = service.start_analysis(
-            url=request.url.strip(),
-            text=request.text.strip(),
-            company=request.company.strip(),
-            role=request.role.strip(),
-            profile_urls=_clean_profile_urls(request.profile_urls),
+        record = _workspace(request).start_analysis(
+            url=payload.url.strip(),
+            text=payload.text.strip(),
+            company=payload.company.strip(),
+            role=payload.role.strip(),
+            profile_urls=_clean_profile_urls(payload.profile_urls),
         )
         return {"application": record.model_dump(mode="json")}
 
     @app.get("/api/applications")
-    async def applications() -> dict[str, object]:
-        return {"applications": [record.model_dump(mode="json") for record in service.list()]}
+    async def applications(request: Request) -> dict[str, object]:
+        records = _workspace(request).list()
+        return {"applications": [record.model_dump(mode="json") for record in records]}
 
     @app.get("/api/applications/{application_id}/status")
-    async def application_status(application_id: str) -> dict[str, object]:
-        record = service.get(application_id)
+    async def application_status(request: Request, application_id: str) -> dict[str, object]:
+        record = _workspace(request).get(application_id)
         if record is None:
             raise HTTPException(status_code=404, detail="Application not found.")
         return {
@@ -397,24 +617,26 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         }
 
     @app.get("/api/applications/{application_id}")
-    async def application_detail(application_id: str) -> dict[str, object]:
+    async def application_detail(request: Request, application_id: str) -> dict[str, object]:
         try:
-            return service.analysis_payload(application_id)
+            return _workspace(request).analysis_payload(application_id)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.put("/api/applications/{application_id}/notes")
-    async def save_notes(application_id: str, request: NotesRequest) -> dict[str, object]:
+    async def save_notes(
+        request: Request, application_id: str, payload: NotesRequest
+    ) -> dict[str, object]:
         try:
-            record = service.save_notes(application_id, _clean_notes(request.notes))
+            record = _workspace(request).save_notes(application_id, _clean_notes(payload.notes))
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"application": record.model_dump(mode="json")}
 
     @app.post("/api/applications/{application_id}/revalidate")
-    async def revalidate(application_id: str) -> dict[str, object]:
+    async def revalidate(request: Request, application_id: str) -> dict[str, object]:
         try:
-            record = service.start_revalidation(application_id)
+            record = _workspace(request).start_revalidation(application_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {
@@ -425,41 +647,66 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         }
 
     @app.post("/api/applications/{application_id}/generate")
-    async def generate(application_id: str) -> dict[str, object]:
+    async def generate(request: Request, application_id: str) -> dict[str, object]:
         try:
-            record = service.start_generation(application_id)
+            record = _workspace(request).start_generation(application_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"application": record.model_dump(mode="json")}
 
+    @app.post("/api/applications/{application_id}/contacts")
+    async def add_contact(
+        request: Request, application_id: str, payload: ContactRequest
+    ) -> dict[str, object]:
+        try:
+            record = _workspace(request).add_contact(application_id, payload.email, payload.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"application": record.model_dump(mode="json")}
+
+    @app.post("/api/applications/{application_id}/outreach")
+    async def outreach(
+        request: Request, application_id: str, payload: OutreachRequest
+    ) -> dict[str, object]:
+        try:
+            return _workspace(request).draft_outreach(
+                application_id,
+                contact_email=payload.contact_email.strip(),
+                user_note=payload.user_note,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.patch("/api/applications/{application_id}/tracker")
+    async def tracker(
+        request: Request, application_id: str, payload: TrackerRequest
+    ) -> dict[str, object]:
+        try:
+            record = _workspace(request).update_tracker(application_id, payload.status)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"application": record.model_dump(mode="json")}
+
+    @app.post("/api/applications/{application_id}/prefill")
+    async def prefill(request: Request, application_id: str) -> dict[str, object]:
+        try:
+            return _workspace(request).prefill_payload(application_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.get("/api/applications/{application_id}/artifacts/{filename}")
     async def artifact(
+        request: Request,
         application_id: str,
         filename: str,
         download: bool = False,
-    ) -> FileResponse:
+    ) -> Response:
         try:
-            path = service.artifact_path(application_id, filename)
+            return _workspace(request).artifact_response(
+                application_id, filename, download=download
+            )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        media_types = {
-            ".pdf": "application/pdf",
-            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".md": "text/markdown",
-            ".html": "text/html",
-        }
-        previewable = {".html", ".md"}
-        disposition = "inline" if path.suffix in previewable and not download else "attachment"
-        return FileResponse(
-            path,
-            media_type=media_types.get(path.suffix, "application/octet-stream"),
-            filename=path.name,
-            content_disposition_type=disposition,
-            headers={
-                "X-Content-Type-Options": "nosniff",
-                "Cache-Control": "no-store",
-            },
-        )
 
     return app
 

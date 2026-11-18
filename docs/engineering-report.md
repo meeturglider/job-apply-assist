@@ -33,6 +33,7 @@ introduced. New model fields are additive with safe defaults.
 | `7780b8e` | Fix artifact preview, downloads, and document verification |
 | `2b5f3ab` | Improve API errors, logging, tasks, and data protection |
 | Add refinement regression coverage and this report | Add end-to-end acceptance tests, award regressions, documentation, and final verification |
+| Private apply portal | Add per-user accounts, session-scoped workspaces, CSRF, public contacts, outreach drafts, tracker, prefill payloads, and a reviewed browser extension |
 
 ## Architecture and Data Flow
 
@@ -64,6 +65,13 @@ PDF + DOCX ATS verification and stored report
 Application records are stored in `data/applications.db`; generated artifacts remain under
 `data/applications/<application-id>/`. There is no schema migration because the added
 Pydantic fields use defaults and ignore unknown legacy data.
+
+Portal mode swaps the persistence layer rather than forking the service. `ApplicationService`
+accepts an application store, profile service, and artifact store; the default implementation
+uses SQLite and files, while portal sessions use `MemoryApplicationStore`,
+`MemoryProfileService`, and `MemoryArtifactStore`. Only account identities and password hashes
+persist in `data/accounts.db`. Each session owns a workspace, and shutdown tears down all
+active workspaces.
 
 ## Scoring Model
 
@@ -191,6 +199,27 @@ Additional URL fetching reuses `fetch_public_text`, so the SSRF controls above a
 profile sources as well as job URLs. Uploaded resumes are also validated against source
 evidence by the same claim validator used for the canonical resume.
 
+## Private Apply Portal
+
+`PORTAL_MODE=true` enables real accounts with session-only candidate data. `AccountStore`
+uses PBKDF2-SHA256 password hashes in a private SQLite database. `SessionManager` keeps
+sessions in memory, prunes expired entries, and creates a fresh service workspace per login.
+Session and CSRF cookies are `HttpOnly`/`SameSite=Lax` as appropriate, and every unsafe API
+method requires the CSRF header to match the session token. Rate-limit keys become
+`user:<id>` for signed-in sessions and `ip:<address>` for unauthenticated portal requests.
+
+`app/jd/contacts.py` extracts public recruiter candidates from JSON-LD `applicationContact`,
+`mailto:` links, and page text. It does not authenticate to LinkedIn or scrape private pages.
+`ApplicationService.draft_outreach` creates a deterministic greeting, role/company context,
+computed experience, and evidence-backed skills; user notes are whitespace-normalized and
+bounded. The draft is opened through a `mailto:` link, so the app never sends email.
+
+`prefill_payload` returns only fields derived from the uploaded resume and analyzed job, plus
+the tailored Markdown artifact. The unpacked extension in `extension/` holds the payload in
+`chrome.storage.session`, waits for the user to click its action on the target tab, fills only
+empty visible fields, emits input/change events, displays a review reminder, and never submits
+a form.
+
 ## Document Generation and Verification
 
 HTML and Markdown artifacts are previewable inline; downloads force attachment semantics.
@@ -206,7 +235,8 @@ details, and experience coverage. DOCX checks still run when PDF rendering is un
 - API responses include a validated or generated `X-Request-ID`.
 - API responses use `Cache-Control: no-store`.
 - Errors use a consistent envelope: `detail`, `code`, and `request_id`.
-- Validation errors return structured field locations instead of leaking internals.
+- Validation errors return structured field locations and clean validator messages instead of
+  leaking Pydantic wrappers or internals.
 - Unexpected exceptions return a generic message; details go only to application logs.
 - Request logs include method, path, status, duration, and request ID.
 - Analyze request fields have maximum lengths to bound payload size.
@@ -218,6 +248,10 @@ details, and experience coverage. DOCX checks still run when PDF rendering is un
 - POST API requests use an in-process fixed-window rate limit (`RATE_LIMIT_PER_MINUTE`)
   keyed by `CF-Connecting-IP` when `TRUST_PROXY_HEADERS` is enabled, otherwise by socket peer.
   Rejections return structured `429` responses with `Retry-After`.
+- Portal mode replaces Basic auth with account sessions and requires a CSRF header for unsafe
+  requests; API responses still use `Cache-Control: no-store`.
+- Portal application, profile, note, draft, and artifact data exists only in the owning
+  session's memory; account identity is the sole persisted user record.
 
 ## Verification
 
@@ -230,7 +264,7 @@ mypy app
 pytest -q
 ```
 
-Result at the time of this report: **72 tests passed**, Ruff clean, mypy clean. The only test
+Result at the time of this report: **84 tests passed**, Ruff clean, mypy clean. The only test
 warning is Starlette's upstream `TestClient`/`httpx` deprecation notice.
 
 Coverage includes scoring separation, evidence classes, dimension matching, education and
@@ -239,7 +273,10 @@ artifact headers, API error envelopes, request IDs, data permissions, task shutd
 verification, award merge/deduplication, resume upload/reset, per-analysis profile URL
 merging, parent-company entity matching, grounded semantic keyword suggestions, LLM
 suggestion rejection/fallback behavior, shared-password gating, per-client rate limiting,
-proxy-aware rate-limit keys, and an end-to-end deterministic analyze/generate flow.
+proxy-aware rate-limit keys, an end-to-end deterministic analyze/generate flow, portal
+registration/login, session isolation, CSRF enforcement, session-only storage, contact
+extraction, outreach drafting, tracker updates, prefill payloads, and portal UI/extension
+controls.
 
 Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio JSON:
 
@@ -256,6 +293,8 @@ Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio
 - Bind to `127.0.0.1` unless an authenticated reverse proxy protects the app.
 - `LLM_PROVIDER=none` exercises deterministic extraction, matching, tailoring, and
   validation without Ollama.
+- `PORTAL_MODE=true` switches to per-user sessions; set `SESSION_COOKIE_SECURE=true` behind an
+  HTTPS tunnel and keep `ALLOW_REGISTRATION=false` after provisioning known users.
 - If PDF generation fails, install Chromium with `playwright install chromium`. DOCX,
   Markdown, HTML, and DOCX ATS checks still work.
 - `LOG_LEVEL`, `OLLAMA_MAX_RETRIES`, and `OLLAMA_RETRY_BACKOFF_SECONDS` are available in
@@ -270,8 +309,8 @@ Real-profile smoke check against the local `MASTER_RESUME.md` and live portfolio
   not guarantee quality or latency.
 - SSRF defenses block the common classes of private-network access; they are not a complete
   network security boundary.
-- The app has one optional shared password, not per-user accounts, and is intended for
-  single-operator local operation or short-lived controlled demos.
+- Local mode has one optional shared password, not per-user accounts; portal mode has accounts
+  but intentionally keeps all candidate work in memory and clears it on logout or restart.
 - PDF verification depends on Playwright Chromium; absent browser support is reported as an
   ATS failure rather than silently passing.
 - Keyword coverage is requirement-oriented and does not model every ATS vendor's scoring.

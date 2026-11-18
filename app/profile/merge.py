@@ -218,13 +218,10 @@ def _merge_identity(master: Identity, portfolio: Identity, portfolio_url: str) -
     )
 
 
-def build_profile(
-    master_path: Path, portfolio: PortfolioSnapshot | None, *, uploaded_resume: bool = False
+def merge_master_profile(
+    master: CandidateProfile, portfolio: PortfolioSnapshot | None
 ) -> CandidateProfile:
-    master = parse_master_resume(master_path)
-    tag_resume_origin(master, master_path.name, uploaded=uploaded_resume)
     if portfolio is None:
-        master.warnings.append("Portfolio data was unavailable; using MASTER_RESUME.md only.")
         return master
 
     portfolio_profile = portfolio.to_profile()
@@ -275,6 +272,17 @@ def build_profile(
         sources={**master.sources, **portfolio_profile.sources},
         warnings=_merge_list([], warnings),
     )
+
+
+def build_profile(
+    master_path: Path, portfolio: PortfolioSnapshot | None, *, uploaded_resume: bool = False
+) -> CandidateProfile:
+    master = parse_master_resume(master_path)
+    tag_resume_origin(master, master_path.name, uploaded=uploaded_resume)
+    profile = merge_master_profile(master, portfolio)
+    if portfolio is None:
+        profile.warnings.append("Portfolio data was unavailable; using MASTER_RESUME.md only.")
+    return profile
 
 
 def _add_duration_warnings(

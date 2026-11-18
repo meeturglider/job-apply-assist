@@ -82,3 +82,19 @@ class ApplicationStore:
             except (json.JSONDecodeError, ValueError):
                 continue
         return records
+
+
+class MemoryApplicationStore:
+    def __init__(self) -> None:
+        self._records: dict[str, ApplicationRecord] = {}
+
+    def save(self, record: ApplicationRecord) -> None:
+        self._records[record.id] = record.model_copy(deep=True)
+
+    def get(self, application_id: str) -> ApplicationRecord | None:
+        record = self._records.get(application_id)
+        return record.model_copy(deep=True) if record is not None else None
+
+    def list(self, limit: int = 50) -> list[ApplicationRecord]:
+        records = sorted(self._records.values(), key=lambda item: item.created_at, reverse=True)
+        return [record.model_copy(deep=True) for record in records[:limit]]

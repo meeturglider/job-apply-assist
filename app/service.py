@@ -8,9 +8,14 @@ import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote
 
+from fastapi.responses import Response
+
+from app.artifacts import ArtifactStore, FileArtifactStore
 from app.config import Settings
 from app.jd.analyze import analyze_job
+from app.jd.contacts import extract_contacts
 from app.jd.extractor import JobExtraction, extract_job, manual_job_text
 from app.jd.fetcher import FetchError, ManualPasteRequired, fetch_job_page
 from app.llm import OllamaClient
@@ -26,9 +31,14 @@ from app.models import (
     AtsCheck,
     AtsReport,
     CandidateProfile,
+    ContactCandidate,
+    EmailDraft,
     JobDescription,
+    PrefillFields,
+    TrackerStatus,
     ValidationReport,
 )
+from app.profile.memory_service import MemoryProfileService
 from app.profile.notes import apply_notes
 from app.profile.service import ProfileService
 from app.rendering.ats import check_ats, check_docx
@@ -36,7 +46,7 @@ from app.rendering.docx import render_docx
 from app.rendering.html import resume_html
 from app.rendering.markdown import resume_markdown
 from app.rendering.pdf import RenderError, render_pdf
-from app.store import ApplicationStore
+from app.store import ApplicationStore, MemoryApplicationStore
 from app.tailoring.builder import build_resume
 
 logger = logging.getLogger(__name__)
@@ -56,11 +66,20 @@ def _notes_revision(notes: list[AnalysisNote]) -> str:
 
 
 class ApplicationService:
-    def __init__(self, settings: Settings) -> None:
-        settings.ensure_dirs()
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        store: ApplicationStore | MemoryApplicationStore | None = None,
+        profiles: ProfileService | MemoryProfileService | None = None,
+        artifacts: ArtifactStore | None = None,
+    ) -> None:
+        if store is None or profiles is None or artifacts is None:
+            settings.ensure_dirs()
         self.settings = settings
-        self.store = ApplicationStore(settings.database_path)
-        self.profiles = ProfileService(settings)
+        self.store = store or ApplicationStore(settings.database_path)
+        self.profiles = profiles or ProfileService(settings)
+        self.artifacts = artifacts or FileArtifactStore(settings.applications_dir)
         self.llm = OllamaClient(settings)
         self._tasks: set[asyncio.Task[None]] = set()
 
@@ -106,6 +125,15 @@ class ApplicationService:
         directory = self.settings.applications_dir / application_id
         directory.mkdir(parents=True, exist_ok=True)
         return directory
+
+    def _write(self, application_id: str, name: str, data: str | bytes) -> None:
+        self.artifacts.write(application_id, name, data)
+
+    def _read_text(self, application_id: str, name: str) -> str:
+        return self.artifacts.read_text(application_id, name)
+
+    def _exists(self, application_id: str, name: str) -> bool:
+        return self.artifacts.exists(application_id, name)
 
     def _track(self, task: asyncio.Task[None]) -> None:
         self._tasks.add(task)
@@ -188,8 +216,7 @@ class ApplicationService:
                 source_url=url or extraction.source_url,
                 job_posting=extraction.job_posting,
             )
-            directory = self._directory(application_id)
-            self._save_jd(directory, extraction)
+            self._save_jd(application_id, extraction)
 
             self._update(
                 record,
@@ -199,9 +226,7 @@ class ApplicationService:
                 message="Loading your resume and portfolio...",
             )
             profile = await self.profiles.load(extra_urls=profile_urls)
-            (directory / "profile.json").write_text(
-                profile.model_dump_json(indent=2), encoding="utf-8"
-            )
+            self._write(application_id, "profile.json", profile.model_dump_json(indent=2))
 
             self._update(
                 record,
@@ -216,6 +241,12 @@ class ApplicationService:
                 location=extraction.location,
                 source_url=url or extraction.source_url,
             )
+            contacts = extract_contacts(
+                extraction.text,
+                job_posting=extraction.job_posting,
+                source_url=url or extraction.source_url,
+            )
+            job.contacts = contacts
             self._update(
                 record,
                 stage="scoring",
@@ -230,10 +261,8 @@ class ApplicationService:
             analysis = await enrich_profile_suggestions(job, profile, analysis, self.llm)
             analysis = self._finalize_analysis(analysis, profile)
 
-            (directory / "job.json").write_text(job.model_dump_json(indent=2), encoding="utf-8")
-            (directory / "analysis.json").write_text(
-                analysis.model_dump_json(indent=2), encoding="utf-8"
-            )
+            self._write(application_id, "job.json", job.model_dump_json(indent=2))
+            self._write(application_id, "analysis.json", analysis.model_dump_json(indent=2))
             self._update(
                 record,
                 status="analyzed",
@@ -243,6 +272,8 @@ class ApplicationService:
                 company=job.company or record.company,
                 role=job.title or record.role,
                 profile_hash=ProfileService.hash(profile),
+                contacts=contacts,
+                tracker_status="analyzed",
             )
         except ManualPasteRequired as exc:
             logger.warning(
@@ -301,8 +332,8 @@ class ApplicationService:
         extraction.source_url = fetched.final_url
         return extraction
 
-    def _save_jd(self, directory: Path, extraction: JobExtraction) -> None:
-        (directory / "jd.md").write_text(extraction.text, encoding="utf-8")
+    def _save_jd(self, application_id: str, extraction: JobExtraction) -> None:
+        self._write(application_id, "jd.md", extraction.text)
         metadata = {
             "source_url": extraction.source_url,
             "title": extraction.title,
@@ -313,8 +344,10 @@ class ApplicationService:
             "warnings": extraction.warnings,
             "fetched_at": datetime.now(UTC).isoformat(),
         }
-        (directory / "jd.json").write_text(
-            json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8"
+        self._write(
+            application_id,
+            "jd.json",
+            json.dumps(metadata, indent=2, ensure_ascii=False),
         )
 
     def save_notes(self, application_id: str, entries: list[dict[str, str]]) -> ApplicationRecord:
@@ -328,12 +361,12 @@ class ApplicationService:
             for item in entries
         ]
         revision = _notes_revision(notes)
-        directory = self._directory(application_id)
-        (directory / "notes.json").write_text(
+        self._write(
+            application_id,
+            "notes.json",
             json.dumps([item.model_dump(mode="json") for item in notes], indent=2),
-            encoding="utf-8",
         )
-        (directory / "profile.noted.json").unlink(missing_ok=True)
+        self.artifacts.delete(application_id, "profile.noted.json")
         return self._update(
             record,
             status="analyzed",
@@ -352,8 +385,9 @@ class ApplicationService:
             raise ValueError("Application not found.")
         if record.status not in {"analyzed", "generated"}:
             raise ValueError("Analyze the job before revalidating notes.")
-        directory = self._directory(application_id)
-        if not (directory / "job.json").exists() or not (directory / "profile.json").exists():
+        if not self._exists(application_id, "job.json") or not self._exists(
+            application_id, "profile.json"
+        ):
             raise ValueError("Analyze the job before revalidating notes.")
         self._update(
             record,
@@ -369,26 +403,30 @@ class ApplicationService:
         record = self.store.get(application_id)
         if record is None:
             return
-        directory = self._directory(application_id)
         try:
-            job = JobDescription.model_validate_json(
-                (directory / "job.json").read_text(encoding="utf-8")
-            )
+            job = JobDescription.model_validate_json(self._read_text(application_id, "job.json"))
             profile = CandidateProfile.model_validate_json(
-                (directory / "profile.json").read_text(encoding="utf-8")
+                self._read_text(application_id, "profile.json")
             )
-            analysis_path = directory / "analysis.json"
-            baseline_path = directory / "analysis.baseline.json"
-            if analysis_path.exists() and not baseline_path.exists():
-                baseline_path.write_bytes(analysis_path.read_bytes())
+            if self._exists(application_id, "analysis.json") and not self._exists(
+                application_id, "analysis.baseline.json"
+            ):
+                self._write(
+                    application_id,
+                    "analysis.baseline.json",
+                    self.artifacts.read_bytes(application_id, "analysis.json"),
+                )
 
             noted_profile, decisions = apply_notes(profile, record.notes)
-            (directory / "notes.json").write_text(
+            self._write(
+                application_id,
+                "notes.json",
                 json.dumps([item.model_dump(mode="json") for item in decisions], indent=2),
-                encoding="utf-8",
             )
-            (directory / "profile.noted.json").write_text(
-                noted_profile.model_dump_json(indent=2), encoding="utf-8"
+            self._write(
+                application_id,
+                "profile.noted.json",
+                noted_profile.model_dump_json(indent=2),
             )
 
             self._update(
@@ -404,7 +442,7 @@ class ApplicationService:
             )
             analysis = await enrich_profile_suggestions(job, noted_profile, analysis, self.llm)
             analysis = self._finalize_analysis(analysis, noted_profile)
-            analysis_path.write_text(analysis.model_dump_json(indent=2), encoding="utf-8")
+            self._write(application_id, "analysis.json", analysis.model_dump_json(indent=2))
 
             accepted = sum(item.status == "accepted" for item in decisions)
             rejected = sum(item.status == "rejected" for item in decisions)
@@ -458,23 +496,20 @@ class ApplicationService:
         record = self.store.get(application_id)
         if record is None:
             return
-        directory = self._directory(application_id)
         logger.info("generation_rendering", extra={"application_id": application_id})
         try:
-            job = JobDescription.model_validate_json(
-                (directory / "job.json").read_text(encoding="utf-8")
-            )
+            job = JobDescription.model_validate_json(self._read_text(application_id, "job.json"))
             analysis = AnalysisResult.model_validate_json(
-                (directory / "analysis.json").read_text(encoding="utf-8")
+                self._read_text(application_id, "analysis.json")
             )
-            noted_path = directory / "profile.noted.json"
-            profile_path = noted_path if noted_path.exists() else directory / "profile.json"
-            if profile_path.exists():
-                profile = CandidateProfile.model_validate_json(
-                    profile_path.read_text(encoding="utf-8")
-                )
-            else:
-                profile = await self.profiles.load(extra_urls=record.profile_urls)
+            profile_name = (
+                "profile.noted.json"
+                if self._exists(application_id, "profile.noted.json")
+                else "profile.json"
+            )
+            profile = CandidateProfile.model_validate_json(
+                self._read_text(application_id, profile_name)
+            )
             resume, validation, method = await build_resume(profile, job, analysis, self.llm)
             self._update(
                 record,
@@ -483,70 +518,58 @@ class ApplicationService:
             )
             markdown = resume_markdown(resume)
             html = resume_html(resume)
-            (directory / "resume.json").write_text(
-                resume.model_dump_json(indent=2), encoding="utf-8"
-            )
-            (directory / "resume.md").write_text(markdown, encoding="utf-8")
-            (directory / "resume.html").write_text(html, encoding="utf-8")
-            (directory / "validation.json").write_text(
-                validation.model_dump_json(indent=2), encoding="utf-8"
-            )
+            self._write(application_id, "resume.json", resume.model_dump_json(indent=2))
+            self._write(application_id, "resume.md", markdown)
+            self._write(application_id, "resume.html", html)
+            self._write(application_id, "validation.json", validation.model_dump_json(indent=2))
 
             artifacts: list[ArtifactInfo] = []
-            artifacts.append(self._artifact(directory, "markdown", "resume.md"))
-            artifacts.append(self._artifact(directory, "html", "resume.html"))
-            render_docx(resume, directory / "resume.docx")
-            artifacts.append(self._artifact(directory, "docx", "resume.docx"))
+            artifacts.append(self._artifact(application_id, "markdown", "resume.md"))
+            artifacts.append(self._artifact(application_id, "html", "resume.html"))
 
             pdf_error = ""
             ats_report: AtsReport
-            try:
-                await render_pdf(html, directory / "resume.pdf")
-                artifacts.append(self._artifact(directory, "pdf", "resume.pdf"))
-            except RenderError as exc:
-                pdf_error = str(exc)
-            if pdf_error:
-                checks = [
-                    AtsCheck(
-                        name="PDF rendering",
-                        passed=False,
-                        detail=pdf_error,
-                    )
-                ]
+            with self.artifacts.render_dir(application_id) as render_dir:
+                docx_path = render_dir / "resume.docx"
+                render_docx(resume, docx_path)
+                self._write(application_id, "resume.docx", docx_path.read_bytes())
+                artifacts.append(self._artifact(application_id, "docx", "resume.docx"))
+
+                pdf_path = render_dir / "resume.pdf"
                 try:
-                    checks.extend(check_docx(resume, directory / "resume.docx"))
-                except Exception as exc:
-                    checks.append(
-                        AtsCheck(
-                            name="DOCX text extraction",
-                            passed=False,
-                            detail=f"DOCX verification failed: {exc}",
-                        )
-                    )
-                ats_report = AtsReport(checks=checks)
-            else:
-                try:
-                    ats_report = check_ats(
-                        resume,
-                        markdown,
-                        directory / "resume.pdf",
-                        job,
-                        html,
-                        directory / "resume.docx",
-                    )
-                except Exception as exc:
-                    ats_report = AtsReport(
-                        checks=[
+                    await render_pdf(html, pdf_path)
+                    self._write(application_id, "resume.pdf", pdf_path.read_bytes())
+                    artifacts.append(self._artifact(application_id, "pdf", "resume.pdf"))
+                except RenderError as exc:
+                    pdf_error = str(exc)
+
+                if pdf_error:
+                    checks = [AtsCheck(name="PDF rendering", passed=False, detail=pdf_error)]
+                    try:
+                        checks.extend(check_docx(resume, docx_path))
+                    except Exception as exc:
+                        checks.append(
                             AtsCheck(
-                                name="ATS inspection",
+                                name="DOCX text extraction",
                                 passed=False,
-                                detail=f"ATS text extraction failed: {exc}",
+                                detail=f"DOCX verification failed: {exc}",
                             )
-                        ]
-                    )
-            (directory / "ats_report.json").write_text(
-                ats_report.model_dump_json(indent=2), encoding="utf-8"
-            )
+                        )
+                    ats_report = AtsReport(checks=checks)
+                else:
+                    try:
+                        ats_report = check_ats(resume, markdown, pdf_path, job, html, docx_path)
+                    except Exception as exc:
+                        ats_report = AtsReport(
+                            checks=[
+                                AtsCheck(
+                                    name="ATS inspection",
+                                    passed=False,
+                                    detail=f"ATS text extraction failed: {exc}",
+                                )
+                            ]
+                        )
+            self._write(application_id, "ats_report.json", ats_report.model_dump_json(indent=2))
 
             metadata = {
                 "application_id": application_id,
@@ -562,8 +585,10 @@ class ApplicationService:
                 "notes_revision": record.notes_revision,
                 "evidence_sources": profile.provenance.model_dump(),
             }
-            (directory / "metadata.json").write_text(
-                json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8"
+            self._write(
+                application_id,
+                "metadata.json",
+                json.dumps(metadata, indent=2, ensure_ascii=False),
             )
             method_labels = {
                 "llm": "LLM tailoring",
@@ -600,12 +625,11 @@ class ApplicationService:
                 error="internal_error",
             )
 
-    def _artifact(self, directory: Path, kind: str, filename: str) -> ArtifactInfo:
-        path = directory / filename
+    def _artifact(self, application_id: str, kind: str, filename: str) -> ArtifactInfo:
         return ArtifactInfo(
             kind=kind,
             filename=filename,
-            size=path.stat().st_size if path.exists() else 0,
+            size=self.artifacts.size(application_id, filename),
         )
 
     def get(self, application_id: str) -> ApplicationRecord | None:
@@ -614,23 +638,45 @@ class ApplicationService:
     def list(self, limit: int = 50) -> list[ApplicationRecord]:
         return self.store.list(limit)
 
-    def artifact_path(self, application_id: str, filename: str) -> Path:
+    def _allowed_artifact(self, application_id: str, filename: str) -> None:
         record = self.store.get(application_id)
         if record is None:
             raise FileNotFoundError("Application not found.")
         allowed = {artifact.filename for artifact in record.artifacts}
         if filename not in allowed:
             raise FileNotFoundError("Artifact not found.")
-        path = self._directory(application_id) / filename
+
+    def artifact_path(self, application_id: str, filename: str) -> Path:
+        self._allowed_artifact(application_id, filename)
+        if not isinstance(self.artifacts, FileArtifactStore):
+            raise FileNotFoundError("Artifacts are held in memory for this session.")
+        path = self.artifacts.path(application_id, filename)
         if not path.exists():
             raise FileNotFoundError("Artifact file is missing.")
         return path
+
+    def artifact_response(self, application_id: str, filename: str, *, download: bool) -> Response:
+        self._allowed_artifact(application_id, filename)
+        media_types = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".md": "text/markdown",
+            ".html": "text/html",
+        }
+        suffix = Path(filename).suffix
+        previewable = {".html", ".md"}
+        disposition = "inline" if suffix in previewable and not download else "attachment"
+        return self.artifacts.response(
+            application_id,
+            filename,
+            media_types.get(suffix, "application/octet-stream"),
+            disposition,
+        )
 
     def analysis_payload(self, application_id: str) -> dict[str, object]:
         record = self.store.get(application_id)
         if record is None:
             raise FileNotFoundError("Application not found.")
-        directory = self._directory(application_id)
         payload: dict[str, object] = {"record": record.model_dump(mode="json")}
         for name in (
             "job",
@@ -643,15 +689,163 @@ class ApplicationService:
             "resume",
             "metadata",
         ):
-            path = directory / f"{name}.json"
-            if path.exists():
-                payload[name] = json.loads(path.read_text(encoding="utf-8"))
-        resume_md = directory / "resume.md"
-        if resume_md.exists():
-            payload["resume_markdown"] = resume_md.read_text(encoding="utf-8")
+            filename = f"{name}.json"
+            if self._exists(application_id, filename):
+                payload[name] = json.loads(self._read_text(application_id, filename))
+        if self._exists(application_id, "resume.md"):
+            payload["resume_markdown"] = self._read_text(application_id, "resume.md")
         validation = payload.get("validation")
         if isinstance(validation, dict):
             payload["validation"] = ValidationReport.model_validate(validation).model_dump(
                 mode="json"
             )
         return payload
+
+    def _read_profile(self, application_id: str) -> CandidateProfile:
+        name = (
+            "profile.noted.json"
+            if self._exists(application_id, "profile.noted.json")
+            else "profile.json"
+        )
+        return CandidateProfile.model_validate_json(self._read_text(application_id, name))
+
+    def add_contact(self, application_id: str, email: str, name: str = "") -> ApplicationRecord:
+        record = self.store.get(application_id)
+        if record is None:
+            raise ValueError("Application not found.")
+        cleaned = email.strip().strip(".,;:()[]<>")
+        if not re.fullmatch(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", cleaned, re.IGNORECASE):
+            raise ValueError("Enter a valid contact email address.")
+        contacts = [item for item in record.contacts if item.email.casefold() != cleaned.casefold()]
+        contacts.append(
+            ContactCandidate(
+                email=cleaned,
+                name=name.strip()[:120],
+                source="Manual entry",
+                confidence=1,
+                confirmed=True,
+            )
+        )
+        return self._update(
+            record,
+            contacts=contacts[:10],
+            selected_contact=cleaned,
+        )
+
+    def draft_outreach(
+        self,
+        application_id: str,
+        *,
+        contact_email: str = "",
+        user_note: str = "",
+    ) -> dict[str, object]:
+        record = self.store.get(application_id)
+        if record is None:
+            raise ValueError("Application not found.")
+        if record.status not in {"analyzed", "generated"}:
+            raise ValueError("Analyze the job before drafting an email.")
+        if contact_email:
+            record = self.add_contact(application_id, contact_email)
+        selected = record.selected_contact
+        if not selected:
+            confirmed = [item for item in record.contacts if item.confirmed]
+            candidates = confirmed or record.contacts
+            if not candidates:
+                raise ValueError("Add or select a recruiter contact first.")
+            selected = candidates[0].email
+            record = self._update(record, selected_contact=selected)
+        job = JobDescription.model_validate_json(self._read_text(application_id, "job.json"))
+        analysis = AnalysisResult.model_validate_json(
+            self._read_text(application_id, "analysis.json")
+        )
+        profile = self._read_profile(application_id)
+        contact = next(
+            (item for item in record.contacts if item.email.casefold() == selected.casefold()),
+            None,
+        )
+        greeting = "Hello," if not contact or not contact.name else f"Hello {contact.name},"
+        name = profile.identity.name or "Candidate"
+        title = job.title or record.role or "the role"
+        company = job.company or record.company or "your team"
+        headline = profile.identity.headline
+        years = profile.experience_years
+        skills = ", ".join(analysis.matched_skills[:6]) or "the role-fit skills in my resume"
+        note = " ".join(user_note.split())[:1000]
+        lines = [
+            greeting,
+            "",
+            f"I'm {name}, and I'm applying for the {title} role at {company}.",
+        ]
+        if headline and years:
+            lines.append(f"I bring {years:g} years of experience in {headline}.")
+        elif years:
+            lines.append(f"I bring {years:g} years of professional experience.")
+        lines.append(f"My profile includes evidence for: {skills}.")
+        if note:
+            lines.extend(["", note])
+        lines.extend(
+            [
+                "",
+                "I've attached a tailored resume and would be glad to discuss how I can help.",
+                "",
+                "Best regards,",
+                name,
+                profile.identity.email,
+            ]
+        )
+        draft = EmailDraft(
+            to=selected,
+            subject=f"Application for {title} - {name}",
+            body="\n".join(lines).strip(),
+            source="deterministic-evidence",
+        )
+        self._update(
+            record,
+            email_draft=draft,
+            selected_contact=selected,
+            tracker_status="email_drafted",
+        )
+        href = f"mailto:{quote(selected)}?subject={quote(draft.subject)}&body={quote(draft.body)}"
+        return {"draft": draft.model_dump(mode="json"), "mailto": href}
+
+    def update_tracker(self, application_id: str, status: TrackerStatus) -> ApplicationRecord:
+        record = self.store.get(application_id)
+        if record is None:
+            raise ValueError("Application not found.")
+        return self._update(record, tracker_status=status)
+
+    def prefill_payload(self, application_id: str) -> dict[str, object]:
+        record = self.store.get(application_id)
+        if record is None:
+            raise ValueError("Application not found.")
+        if record.status not in {"analyzed", "generated"}:
+            raise ValueError("Analyze the job before pre-filling an application.")
+        profile = self._read_profile(application_id)
+        analysis = AnalysisResult.model_validate_json(
+            self._read_text(application_id, "analysis.json")
+        )
+        fields = PrefillFields(
+            name=profile.identity.name,
+            email=profile.identity.email,
+            phone=profile.identity.phone,
+            linkedin=profile.identity.linkedin,
+            github=profile.identity.github,
+            portfolio=profile.identity.portfolio,
+            role=analysis.job.title or record.role,
+            company=analysis.job.company or record.company,
+            location=analysis.job.location,
+            experience_years=profile.experience_years,
+            skills=list(analysis.matched_skills),
+        )
+        markdown = (
+            self._read_text(application_id, "resume.md")
+            if self._exists(application_id, "resume.md")
+            else ""
+        )
+        status = record.tracker_status if record.tracker_status == "submitted" else "prefilled"
+        self._update(
+            record,
+            tracker_status=status,
+            prefill_count=record.prefill_count + 1,
+        )
+        return {"fields": fields.model_dump(mode="json"), "resume_markdown": markdown}

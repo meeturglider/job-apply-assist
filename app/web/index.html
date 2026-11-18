@@ -15,14 +15,28 @@
         <div class="brand-sub">Evidence-based ATS tailoring</div>
       </div>
     </div>
-    <div class="status-strip">
+    <div class="status-strip" id="status-strip">
       <span class="pill" id="llm-status">Checking model...</span>
       <span class="pill" id="profile-status">Loading profile...</span>
       <button class="ghost-button" id="refresh-profile" type="button">Refresh profile</button>
+      <span class="pill" id="account-email" hidden></span>
+      <button class="ghost-button" id="logout-button" type="button" hidden>Sign out</button>
     </div>
   </header>
 
-  <main class="layout">
+  <section class="auth-card" id="auth-panel" hidden>
+    <h2 id="auth-title">Sign in to your private workspace</h2>
+    <p class="muted">Your resume, jobs, and tracker stay in memory for this session only.</p>
+    <form id="auth-form" novalidate>
+      <label class="field"><span>Email</span><input id="auth-email" type="email" autocomplete="username" required></label>
+      <label class="field"><span>Password</span><input id="auth-password" type="password" autocomplete="current-password" required minlength="8"></label>
+      <button class="primary-button" id="auth-submit" type="submit">Sign in</button>
+    </form>
+    <button class="link-button" id="auth-mode-toggle" type="button" hidden>New user? Create account</button>
+    <div class="form-error" id="auth-error" hidden></div>
+  </section>
+
+  <main class="layout" id="workspace">
     <aside class="sidebar">
       <section class="panel">
         <div class="panel-heading">
@@ -36,6 +50,7 @@
         <div class="source-actions">
           <button class="primary-button" id="upload-resume" type="button">Upload resume</button>
           <button class="ghost-button" id="reset-resume" type="button">Use default</button>
+          <button class="ghost-button" id="clear-resume" type="button" hidden>Clear resume</button>
         </div>
         <label class="field">
           <span>Additional profile URLs</span>
@@ -77,7 +92,7 @@
       <section class="panel history-panel">
         <div class="panel-heading">
           <h2>History</h2>
-          <span class="micro">Local only</span>
+          <span class="micro" id="history-scope">Local only</span>
         </div>
         <div id="history" class="history-list">
           <div class="muted">No applications yet.</div>
@@ -201,6 +216,39 @@
         <div class="panel warning-panel" id="warning-panel" hidden>
           <h3>Review warnings</h3>
           <ul id="warnings"></ul>
+        </div>
+
+        <div class="panel" id="apply-panel">
+          <div class="panel-heading">
+            <h3>Apply workflow</h3>
+            <span class="micro">You review and submit</span>
+          </div>
+          <label class="field">
+            <span>Tracker status</span>
+            <select id="tracker-status">
+              <option value="draft">Draft</option>
+              <option value="analyzed">Analyzed</option>
+              <option value="email_drafted">Email drafted</option>
+              <option value="prefilled">Prefilled</option>
+              <option value="submitted">Submitted</option>
+            </select>
+          </label>
+          <div class="field-row">
+            <label class="field"><span>Recruiter email (optional)</span><input id="contact-email" type="email" placeholder="recruiter@company.com"></label>
+            <label class="field"><span>Name (optional)</span><input id="contact-name" type="text" placeholder="Recruiter name"></label>
+          </div>
+          <button class="ghost-button" id="add-contact" type="button">Save contact</button>
+          <div id="contact-list" class="chip-row"></div>
+          <label class="field">
+            <span>Personal note for the email (optional)</span>
+            <textarea id="outreach-note" rows="3" placeholder="Add one grounded, specific sentence."></textarea>
+          </label>
+          <div class="source-actions">
+            <button class="ghost-button" id="draft-outreach" type="button">Draft email</button>
+            <button class="ghost-button" id="prefill-form" type="button">Fill open application</button>
+          </div>
+          <textarea id="email-draft" class="note-input" rows="8" readonly placeholder="Email draft appears here"></textarea>
+          <a id="mailto-link" class="ghost-button" href="#" hidden>Open in email client</a>
         </div>
 
         <div class="action-bar">

@@ -3,6 +3,11 @@ const state = {
   timer: null,
   mode: "analysis",
   detail: null,
+  portalMode: false,
+  allowRegistration: false,
+  authMode: "login",
+  csrf: "",
+  accountEmail: "",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -19,10 +24,15 @@ function clear(node) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
-  });
+  const method = (options.method || "GET").toUpperCase();
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  if (state.csrf && !["GET", "HEAD"].includes(method)) {
+    headers["X-CSRF-Token"] = state.csrf;
+  }
+  const response = await fetch(path, { headers, ...options });
+  if (response.status === 401 && state.portalMode && !path.startsWith("/api/auth/")) {
+    showAuthPanel("Sign in again to continue.");
+  }
   if (!response.ok) {
     let detail = `Request failed (${response.status})`;
     try {
@@ -34,7 +44,10 @@ async function api(path, options = {}) {
         detail = payload.message || detail;
         if (Array.isArray(payload.errors) && payload.errors.length) {
           const first = payload.errors[0];
-          if (first && first.msg) detail += ` ${first.msg}`;
+          if (first && first.msg) {
+            const field = Array.isArray(first.loc) ? first.loc[first.loc.length - 1] : "";
+            detail += ` ${field ? `${field}: ` : ""}${first.msg}`;
+          }
         }
       }
       if (body.request_id) {
@@ -514,6 +527,7 @@ function renderAnalysis(detail) {
   renderSkillLists(analysis);
   renderEvidence(analysis);
   renderProvenance(detail);
+  renderApplyWorkflow(detail);
   renderRecommendations(analysis, job);
   renderKeywords(analysis);
   renderWarnings([...(analysis.warnings || []), ...(job.warnings || [])]);
@@ -530,6 +544,32 @@ function renderAnalysis(detail) {
   revalidate.hidden = !pending;
   revalidate.disabled = false;
   revalidate.textContent = "Revalidate notes";
+}
+
+function renderApplyWorkflow(detail) {
+  const record = detail.record || {};
+  const tracker = $("tracker-status");
+  if (tracker) tracker.value = record.tracker_status || "draft";
+  const contacts = $("contact-list");
+  if (contacts) {
+    clear(contacts);
+    (record.contacts || []).forEach((contact) => {
+      const label = `${contact.email}${contact.name ? ` · ${contact.name}` : ""}`;
+      contacts.appendChild(el("span", "chip", label));
+    });
+    if (!(record.contacts || []).length) {
+      contacts.appendChild(el("span", "micro", "No public contact found; add one manually."));
+    }
+  }
+  const draft = record.email_draft;
+  if ($("email-draft")) $("email-draft").value = draft ? draft.body : "";
+  const link = $("mailto-link");
+  if (link) {
+    link.hidden = !draft;
+    if (draft) {
+      link.href = `mailto:${encodeURIComponent(draft.to)}?subject=${encodeURIComponent(draft.subject)}&body=${encodeURIComponent(draft.body)}`;
+    }
+  }
 }
 
 function renderBreakdown(analysis) {
@@ -915,12 +955,243 @@ async function poll() {
   }
 }
 
+async function reloadDetail() {
+  if (!state.currentId) return;
+  renderDetail(await api(`/api/applications/${state.currentId}`));
+}
+
+async function setTrackerStatus() {
+  if (!state.currentId) return;
+  try {
+    const value = $("tracker-status").value;
+    const data = await api(`/api/applications/${state.currentId}/tracker`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: value }),
+    });
+    state.detail.record = data.application;
+    renderApplyWorkflow(state.detail);
+    showNotice(`Tracker status: ${value.replaceAll("_", " ")}.`, "success");
+    refreshHistory();
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+async function saveContact() {
+  if (!state.currentId) return;
+  const email = $("contact-email").value.trim();
+  if (!email) {
+    showNotice("Enter a recruiter email first.", "warning");
+    return;
+  }
+  try {
+    const data = await api(`/api/applications/${state.currentId}/contacts`, {
+      method: "POST",
+      body: JSON.stringify({ email, name: $("contact-name").value.trim() }),
+    });
+    state.detail.record = data.application;
+    renderApplyWorkflow(state.detail);
+    showNotice("Contact saved for this application.", "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+async function createOutreach() {
+  if (!state.currentId) return;
+  try {
+    const data = await api(`/api/applications/${state.currentId}/outreach`, {
+      method: "POST",
+      body: JSON.stringify({
+        contact_email: $("contact-email").value.trim(),
+        user_note: $("outreach-note").value.trim(),
+      }),
+    });
+    const detail = await api(`/api/applications/${state.currentId}`);
+    renderDetail(detail);
+    if (data.mailto) {
+      const link = $("mailto-link");
+      link.href = data.mailto;
+      link.hidden = false;
+    }
+    showNotice("Email drafted. Review it before sending.", "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+async function sendPrefill() {
+  if (!state.currentId) return;
+  try {
+    const payload = await api(`/api/applications/${state.currentId}/prefill`, {
+      method: "POST",
+      body: "{}",
+    });
+    window.postMessage({ type: "JOB_ASSIST_PREFILL", payload }, window.location.origin);
+    await reloadDetail();
+    showNotice(
+      "Fill payload sent. Review every field in the open application before submitting.",
+      "success",
+    );
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+async function clearResume() {
+  try {
+    await api("/api/profile/resume/reset", { method: "POST", body: "{}" });
+    $("resume-file").value = "";
+    showNotice("Session resume cleared.", "success");
+    await refreshHealth();
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
+}
+
+function showAuthError(message = "") {
+  const error = $("auth-error");
+  error.hidden = !message;
+  error.textContent = message;
+}
+
+function setAuthMode(mode) {
+  state.authMode = mode === "register" ? "register" : "login";
+  const register = state.authMode === "register";
+  $("auth-title").textContent = register
+    ? "Create your private workspace"
+    : "Sign in to your private workspace";
+  $("auth-submit").textContent = register ? "Create account" : "Sign in";
+  const toggle = $("auth-mode-toggle");
+  toggle.textContent = register
+    ? "Already have an account? Sign in"
+    : "New user? Create account";
+  toggle.hidden = !state.allowRegistration;
+  $("auth-password").autocomplete = register ? "new-password" : "current-password";
+  showAuthError();
+}
+
+function validateAuth(email, password) {
+  if (
+    !email ||
+    email.length < 3 ||
+    email.length > 320 ||
+    !email.includes("@") ||
+    email.startsWith("@") ||
+    email.endsWith("@") ||
+    /\s/.test(email)
+  ) {
+    return "Enter a valid email address.";
+  }
+  if (!password) return "Enter your password.";
+  if (password.length < 8) return "Use a password of at least 8 characters.";
+  return "";
+}
+
+function showAuthPanel(message = "") {
+  $("auth-panel").hidden = false;
+  $("workspace").hidden = true;
+  $("status-strip").hidden = true;
+  $("auth-password").value = "";
+  setAuthMode("login");
+  showAuthError(message);
+}
+
+function applySession(data) {
+  state.csrf = data.csrf_token || "";
+  state.accountEmail = data.account?.email || "";
+  $("auth-panel").hidden = true;
+  $("workspace").hidden = false;
+  $("status-strip").hidden = false;
+  const email = $("account-email");
+  email.hidden = !state.accountEmail;
+  email.textContent = state.accountEmail;
+  $("logout-button").hidden = !state.accountEmail;
+  showAuthError();
+  refreshHealth();
+  refreshHistory();
+}
+
+async function authenticate() {
+  const email = $("auth-email").value.trim();
+  const password = $("auth-password").value;
+  const validation = validateAuth(email, password);
+  if (validation) {
+    showAuthError(validation);
+    return;
+  }
+  const button = $("auth-submit");
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = state.authMode === "register" ? "Creating..." : "Signing in...";
+  try {
+    const data = await api(`/api/auth/${state.authMode}`, {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    $("auth-password").value = "";
+    applySession(data);
+  } catch (error) {
+    showAuthError(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+async function logout() {
+  try {
+    await api("/api/auth/logout", { method: "POST", body: "{}" });
+  } catch (_) {
+    state.csrf = "";
+  }
+  state.csrf = "";
+  state.accountEmail = "";
+  state.currentId = null;
+  state.detail = null;
+  stopPolling();
+  showAuthPanel();
+}
+
+async function boot() {
+  const config = await api("/api/auth/config");
+  state.portalMode = Boolean(config.portal_mode);
+  state.allowRegistration = Boolean(config.allow_registration);
+  $("reset-resume").hidden = state.portalMode;
+  $("clear-resume").hidden = !state.portalMode;
+  $("history-scope").textContent = state.portalMode ? "Session only" : "Local only";
+  setAuthMode("login");
+  if (!state.portalMode) {
+    $("status-strip").hidden = false;
+    refreshHealth();
+    refreshHistory();
+    return;
+  }
+  try {
+    applySession(await api("/api/auth/me"));
+  } catch (_) {
+    showAuthPanel();
+  }
+}
+
 $("analyze-form").addEventListener("submit", submitAnalysis);
 $("generate-button").addEventListener("click", generateResume);
 $("revalidate-button").addEventListener("click", revalidateNotes);
 $("refresh-profile").addEventListener("click", refreshProfile);
 $("upload-resume").addEventListener("click", uploadResume);
 $("reset-resume").addEventListener("click", resetResume);
+$("clear-resume").addEventListener("click", clearResume);
+$("tracker-status").addEventListener("change", setTrackerStatus);
+$("add-contact").addEventListener("click", saveContact);
+$("draft-outreach").addEventListener("click", createOutreach);
+$("prefill-form").addEventListener("click", sendPrefill);
+$("auth-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  authenticate();
+});
+$("auth-mode-toggle").addEventListener("click", () => {
+  setAuthMode(state.authMode === "login" ? "register" : "login");
+});
+$("logout-button").addEventListener("click", logout);
 
-refreshHealth();
-refreshHistory();
+boot();
