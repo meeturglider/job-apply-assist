@@ -13,6 +13,8 @@ const state = {
   revalidating: false,
   csrf: "",
   accountEmail: "",
+  needsRecoveryCode: false,
+  sessionDialogSource: "history",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -356,18 +358,24 @@ function profileUrls() {
     .filter(Boolean);
 }
 
-function historyButton(record, onSelect) {
-  const item = el("button", "history-item");
-  item.type = "button";
+function historyButton(record, onSelect, onEdit) {
+  const item = el("div", "history-item");
   item.classList.toggle("active", record.id === state.currentId);
+  const select = el("button", "history-select");
+  select.type = "button";
   const left = el("div");
   left.appendChild(el("div", "history-title", record.role || record.company || "Untitled role"));
   left.appendChild(el("div", "history-sub", `${record.company || "Unknown company"} · ${record.status}`));
-  item.appendChild(left);
+  select.appendChild(left);
   if (record.score) {
-    item.appendChild(el("div", "history-score", `${Math.round(record.score)}%`));
+    select.appendChild(el("div", "history-score", `${Math.round(record.score)}%`));
   }
-  item.addEventListener("click", () => onSelect(record));
+  select.addEventListener("click", () => onSelect(record));
+  const edit = el("button", "history-edit", "Edit");
+  edit.type = "button";
+  edit.addEventListener("click", () => onEdit(record));
+  item.appendChild(select);
+  item.appendChild(edit);
   return item;
 }
 
@@ -382,10 +390,97 @@ async function refreshHistory(history = null) {
       return;
     }
     data.applications.forEach((record) => {
-      list.appendChild(historyButton(record, (item) => openApplication(item.id, item.status)));
+      list.appendChild(
+        historyButton(
+          record,
+          (item) => openApplication(item.id, item.status),
+          (item) => openSessionDialog(item, "history"),
+        ),
+      );
     });
   } catch (error) {
     console.error(error);
+  }
+}
+
+function openSessionDialog(record = null, source = "history") {
+  state.sessionDialogSource = source;
+  $("session-id").value = record?.id || "";
+  $("session-company").value = record?.company || "";
+  $("session-role").value = record?.role || "";
+  $("session-source-url").value = record?.source_url || "";
+  $("session-dialog-title").textContent = record ? "Edit session details" : "Add session";
+  $("session-save").textContent = record ? "Save details" : "Add session";
+  $("session-error").hidden = true;
+  $("session-error").textContent = "";
+  const dialog = $("session-dialog");
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
+function renderResumeHistory(applications) {
+  const list = $("resume-history");
+  clear(list);
+  applications.forEach((record) => {
+    list.appendChild(
+      historyButton(
+        record,
+        (item) => {
+          $("resume-dialog").close();
+          openApplication(item.id, item.status);
+        },
+        (item) => openSessionDialog(item, "resume"),
+      ),
+    );
+  });
+}
+
+async function saveSessionDetails(event) {
+  event.preventDefault();
+  const applicationId = $("session-id").value.trim();
+  const payload = {
+    company: $("session-company").value.trim(),
+    role: $("session-role").value.trim(),
+    source_url: $("session-source-url").value.trim(),
+  };
+  if (!payload.company && !payload.role && !payload.source_url) {
+    $("session-error").hidden = false;
+    $("session-error").textContent = "Enter a company, role, or source URL.";
+    return;
+  }
+  const button = $("session-save");
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "Saving...";
+  try {
+    const data = await api(
+      applicationId ? `/api/applications/${applicationId}/details` : "/api/applications/manual",
+      { method: applicationId ? "PATCH" : "POST", body: JSON.stringify(payload) },
+    );
+    $("session-dialog").close();
+    showNotice(applicationId ? "Session details saved." : "Draft session added.", "success");
+    const history = await api("/api/applications");
+    refreshHistory(history);
+    if (state.sessionDialogSource === "resume") renderResumeHistory(history.applications);
+    if (applicationId && applicationId === state.currentId) {
+      if (data.application.status === "generating") {
+        state.mode = "generation";
+        showProgress("generation", "Refreshing documents...");
+        poll();
+      } else if (state.detail) {
+        state.detail.record = data.application;
+        renderDetail(state.detail);
+      }
+    }
+  } catch (error) {
+    $("session-error").hidden = false;
+    $("session-error").textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
   }
 }
 
@@ -587,6 +682,16 @@ function renderProvenance(detail) {
 function renderDetail(detail) {
   state.detail = detail;
   const record = detail.record;
+  if (record.status === "draft") {
+    $("job-url").value = record.source_url || "";
+    $("job-company").value = record.company || "";
+    $("job-role").value = record.role || "";
+    $("progress-card").hidden = true;
+    $("result").hidden = true;
+    $("empty-state").hidden = false;
+    showNotice("Draft session loaded. Add the job description and analyze to build documents.", "success");
+    return;
+  }
   if (record.status === "needs_paste") {
     showNotice(
       record.message || "This job site needs the description pasted manually.",
@@ -1455,6 +1560,8 @@ async function submitAnalysis(event) {
         company: $("job-company").value.trim(),
         role: $("job-role").value.trim(),
         profile_urls: profileUrls(),
+        application_id:
+          state.detail?.record?.status === "draft" ? state.detail.record.id : "",
       }),
     });
     state.currentId = data.application.id;
@@ -1621,18 +1728,31 @@ function showAuthError(message = "") {
 }
 
 function setAuthMode(mode) {
-  state.authMode = mode === "register" ? "register" : "login";
+  state.authMode = ["login", "register", "recover"].includes(mode) ? mode : "login";
   const register = state.authMode === "register";
+  const recover = state.authMode === "recover";
   $("auth-title").textContent = register
     ? "Create your private workspace"
-    : "Sign in to your private workspace";
-  $("auth-submit").textContent = register ? "Create account" : "Sign in";
+    : recover
+      ? "Reset your password"
+      : "Sign in to your private workspace";
+  $("auth-submit").textContent = register
+    ? "Create account"
+    : recover
+      ? "Reset password"
+      : "Sign in";
+  $("auth-password-label").textContent = recover ? "New password (8+ characters)" : "Password";
+  $("auth-password").autocomplete = register || recover ? "new-password" : "current-password";
+  $("auth-recovery-code-field").hidden = !recover;
+  $("auth-recovery-code").value = "";
+  $("auth-forgot").hidden = register || recover;
   const toggle = $("auth-mode-toggle");
-  toggle.textContent = register
-    ? "Already have an account? Sign in"
-    : "New user? Create account";
-  toggle.hidden = !state.allowRegistration;
-  $("auth-password").autocomplete = register ? "new-password" : "current-password";
+  toggle.textContent = recover
+    ? "Back to sign in"
+    : register
+      ? "Already have an account? Sign in"
+      : "New user? Create account";
+  toggle.hidden = !recover && !register && !state.allowRegistration;
   showAuthError();
 }
 
@@ -1648,9 +1768,42 @@ function validateAuth(email, password) {
   ) {
     return "Enter a valid email address.";
   }
-  if (!password) return "Enter your password.";
+  if (state.authMode === "recover" && !$("auth-recovery-code").value.trim()) {
+    return "Enter your recovery code.";
+  }
+  if (!password) return state.authMode === "recover" ? "Enter a new password." : "Enter your password.";
   if (password.length < 8) return "Use a password of at least 8 characters.";
   return "";
+}
+
+function showRecoveryNotice(code) {
+  $("recovery-notice-value").textContent = code;
+  $("recovery-notice").hidden = false;
+}
+
+function showRecoveryDialog(code, message) {
+  $("recovery-dialog-value").textContent = code;
+  $("recovery-dialog-message").textContent = message;
+  const dialog = $("recovery-dialog");
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
+async function createRecoveryCode() {
+  try {
+    const data = await api("/api/account/recovery-code", { method: "POST", body: "{}" });
+    state.needsRecoveryCode = false;
+    showRecoveryDialog(
+      data.recovery_code,
+      "A new recovery code was generated. The previous code no longer works.",
+    );
+    showNotice("Recovery code generated.", "success");
+  } catch (error) {
+    showNotice(error.message, "error");
+  }
 }
 
 function showAuthPanel(message = "") {
@@ -1658,6 +1811,7 @@ function showAuthPanel(message = "") {
   $("workspace").hidden = true;
   $("status-strip").hidden = true;
   $("auth-password").value = "";
+  $("recovery-notice").hidden = true;
   setAuthMode("login");
   showAuthError(message);
 }
@@ -1678,16 +1832,7 @@ function startNewSession() {
 function showResumeDialog(applications) {
   if (!applications.length) return;
   const dialog = $("resume-dialog");
-  const list = $("resume-history");
-  clear(list);
-  applications.forEach((record) => {
-    list.appendChild(
-      historyButton(record, (item) => {
-        dialog.close();
-        openApplication(item.id, item.status);
-      }),
-    );
-  });
+  renderResumeHistory(applications);
   if (typeof dialog.showModal === "function") {
     dialog.showModal();
   } else {
@@ -1698,15 +1843,23 @@ function showResumeDialog(applications) {
 async function applySession(data) {
   state.csrf = data.csrf_token || "";
   state.accountEmail = data.account?.email || "";
+  state.needsRecoveryCode = Boolean(data.needs_recovery_code);
   $("auth-panel").hidden = true;
   $("workspace").hidden = false;
   $("status-strip").hidden = false;
   const email = $("account-email");
   email.hidden = !state.accountEmail;
   email.textContent = state.accountEmail;
+  $("recovery-code-button").hidden = !state.accountEmail;
   $("logout-button").hidden = !state.accountEmail;
   showAuthError();
   startNewSession();
+  if (state.needsRecoveryCode) {
+    showNotice(
+      "Create a recovery code from the header so you can reset your password later.",
+      "warning",
+    );
+  }
   refreshHealth();
   try {
     const history = await api("/api/applications");
@@ -1720,6 +1873,8 @@ async function applySession(data) {
 async function authenticate() {
   const email = $("auth-email").value.trim();
   const password = $("auth-password").value;
+  const recoveryCode = $("auth-recovery-code").value.trim();
+  const mode = state.authMode;
   const validation = validateAuth(email, password);
   if (validation) {
     showAuthError(validation);
@@ -1728,14 +1883,32 @@ async function authenticate() {
   const button = $("auth-submit");
   const label = button.textContent;
   button.disabled = true;
-  button.textContent = state.authMode === "register" ? "Creating..." : "Signing in...";
+  button.textContent =
+    mode === "register" ? "Creating..." : mode === "recover" ? "Resetting..." : "Signing in...";
   try {
-    const data = await api(`/api/auth/${state.authMode}`, {
+    const data = await api(mode === "recover" ? "/api/auth/reset" : `/api/auth/${mode}`, {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify(
+        mode === "recover"
+          ? { email, recovery_code: recoveryCode, new_password: password }
+          : { email, password },
+      ),
     });
     $("auth-password").value = "";
+    $("auth-recovery-code").value = "";
+    if (mode === "recover") {
+      showRecoveryNotice(data.recovery_code);
+      setAuthMode("login");
+      $("auth-email").value = email;
+      return;
+    }
     await applySession(data);
+    if (data.recovery_code) {
+      showRecoveryDialog(
+        data.recovery_code,
+        "Save this recovery code now. It is shown only once and can reset your password.",
+      );
+    }
   } catch (error) {
     showAuthError(error.message);
   } finally {
@@ -1752,6 +1925,8 @@ async function logout() {
   }
   state.csrf = "";
   state.accountEmail = "";
+  state.needsRecoveryCode = false;
+  $("recovery-code-button").hidden = true;
   state.currentId = null;
   state.detail = null;
   state.resumeDraft = null;
@@ -1806,11 +1981,30 @@ $("auth-form").addEventListener("submit", (event) => {
 $("auth-mode-toggle").addEventListener("click", () => {
   setAuthMode(state.authMode === "login" ? "register" : "login");
 });
+$("auth-forgot").addEventListener("click", () => {
+  setAuthMode("recover");
+  $("auth-email").focus();
+});
+$("recovery-code-button").addEventListener("click", createRecoveryCode);
+$("recovery-dialog-close").addEventListener("click", () => $("recovery-dialog").close());
+$("recovery-copy").addEventListener("click", async () => {
+  const code = $("recovery-dialog-value").textContent;
+  try {
+    await navigator.clipboard.writeText(code);
+    $("recovery-copy").textContent = "Copied";
+  } catch (_) {
+    $("recovery-copy").textContent = "Copy failed";
+  }
+});
 $("logout-button").addEventListener("click", logout);
 $("new-session-button").addEventListener("click", () => {
   $("resume-dialog").close();
   startNewSession();
   refreshHistory();
 });
+$("history-add-button").addEventListener("click", () => openSessionDialog(null, "history"));
+$("new-draft-button").addEventListener("click", () => openSessionDialog(null, "resume"));
+$("session-dialog-close").addEventListener("click", () => $("session-dialog").close());
+$("session-form").addEventListener("submit", saveSessionDetails);
 
 boot();

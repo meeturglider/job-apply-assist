@@ -346,3 +346,172 @@ def test_portal_restart_marks_interrupted_runs(tmp_path: Path, master_text: str)
     assert updated is not None
     assert updated.status == "error"
     assert updated.error == "interrupted"
+
+
+def test_portal_recovery_code_resets_password_and_rotates_code(
+    tmp_path: Path, master_text: str
+) -> None:
+    app = create_app(_portal_settings(tmp_path, master_text))
+    with TestClient(app) as client:
+        registered = client.post(
+            "/api/auth/register",
+            json={"email": "recover@example.com", "password": "long-password"},
+        )
+        assert registered.status_code == 200
+        original_code = str(registered.json()["recovery_code"])
+        assert registered.json()["needs_recovery_code"] is False
+
+        rejected = client.post(
+            "/api/auth/reset",
+            json={
+                "email": "recover@example.com",
+                "recovery_code": "AAAAA-AAAAA-AAAAA-AAAAA",
+                "new_password": "new-long-password",
+            },
+        )
+        assert rejected.status_code == 400
+
+        reset = client.post(
+            "/api/auth/reset",
+            json={
+                "email": "recover@example.com",
+                "recovery_code": original_code,
+                "new_password": "new-long-password",
+            },
+        )
+        assert reset.status_code == 200
+        next_code = str(reset.json()["recovery_code"])
+        assert next_code != original_code
+
+        assert (
+            client.post(
+                "/api/auth/login",
+                json={"email": "recover@example.com", "password": "long-password"},
+            ).status_code
+            == 401
+        )
+        assert (
+            client.post(
+                "/api/auth/login",
+                json={"email": "recover@example.com", "password": "new-long-password"},
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                "/api/auth/reset",
+                json={
+                    "email": "recover@example.com",
+                    "recovery_code": original_code,
+                    "new_password": "another-password",
+                },
+            ).status_code
+            == 400
+        )
+
+
+def test_portal_recovery_code_rotation_requires_csrf(tmp_path: Path, master_text: str) -> None:
+    app = create_app(_portal_settings(tmp_path, master_text))
+    with TestClient(app) as client:
+        registered = client.post(
+            "/api/auth/register",
+            json={"email": "rotate@example.com", "password": "long-password"},
+        )
+        assert registered.status_code == 200
+        original_code = str(registered.json()["recovery_code"])
+        headers = {"x-csrf-token": str(registered.json()["csrf_token"])}
+
+        assert client.post("/api/account/recovery-code", json={}).status_code == 403
+        rotated = client.post("/api/account/recovery-code", json={}, headers=headers)
+        assert rotated.status_code == 200
+        rotated_code = str(rotated.json()["recovery_code"])
+        assert rotated_code != original_code
+
+        reset = client.post(
+            "/api/auth/reset",
+            json={
+                "email": "rotate@example.com",
+                "recovery_code": rotated_code,
+                "new_password": "new-long-password",
+            },
+        )
+        assert reset.status_code == 200
+
+
+def test_portal_manual_draft_details_and_artifact_preservation(
+    tmp_path: Path, master_text: str
+) -> None:
+    app = create_app(_portal_settings(tmp_path, master_text))
+    with TestClient(app) as client:
+        headers = _register(client, "details@example.com")
+        uploaded = client.post(
+            "/api/profile/resume",
+            json={"text": master_text, "filename": "resume.md"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 200
+        created = client.post(
+            "/api/applications/manual",
+            json={"company": "Old Co", "role": "Old Role", "source_url": ""},
+            headers=headers,
+        )
+        assert created.status_code == 200
+        application_id = str(created.json()["application"]["id"])
+        assert created.json()["application"]["status"] == "draft"
+
+        analyzed = client.post(
+            "/api/analyze",
+            json={
+                "text": "Python engineer needed with cloud experience. " * 5,
+                "application_id": application_id,
+            },
+            headers=headers,
+        )
+        assert analyzed.status_code == 200
+        assert analyzed.json()["application"]["id"] == application_id
+        assert (
+            _wait_for_status(client, application_id, headers, {"analyzed", "error"}) == "analyzed"
+        )
+
+        generated = client.post(
+            f"/api/applications/{application_id}/generate", json={}, headers=headers
+        )
+        assert generated.status_code == 200
+        assert (
+            _wait_for_status(client, application_id, headers, {"generated", "error"}) == "generated"
+        )
+
+        detail = client.get(f"/api/applications/{application_id}", headers=headers).json()
+        saved = client.put(
+            f"/api/applications/{application_id}/resume", json=detail["resume"], headers=headers
+        )
+        assert saved.status_code == 200
+        manual_markdown = str(saved.json()["resume_markdown"])
+
+        updated = client.patch(
+            f"/api/applications/{application_id}/details",
+            json={
+                "company": "New Co",
+                "role": "New Role",
+                "source_url": "https://example.com/jobs/new-role",
+            },
+            headers=headers,
+        )
+        assert updated.status_code == 200
+        assert updated.json()["application"]["status"] == "generating"
+        assert (
+            _wait_for_status(client, application_id, headers, {"generated", "error"}) == "generated"
+        )
+
+        final = client.get(f"/api/applications/{application_id}", headers=headers).json()
+        assert final["record"]["company"] == "New Co"
+        assert final["record"]["role"] == "New Role"
+        assert final["record"]["source_url"] == "https://example.com/jobs/new-role"
+        assert final["job"]["company"] == "New Co"
+        assert final["job"]["title"] == "New Role"
+        assert final["job"]["source_url"] == "https://example.com/jobs/new-role"
+        assert final["analysis"]["job"]["company"] == "New Co"
+        assert final["metadata"]["company"] == "New Co"
+        assert final["metadata"]["job_title"] == "New Role"
+        assert final["metadata"]["method"] == "details-update"
+        assert final["resume_markdown"] == manual_markdown

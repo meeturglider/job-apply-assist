@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from docx import Document as DocxDocument
+
 from app.matching.scorer import analyze_match
 from app.models import (
     CandidateProfile,
@@ -50,7 +52,12 @@ def test_renders_markdown_html_and_docx(profile: CandidateProfile, tmp_path: Pat
     assert '<a href="mailto:test@example.com">test@example.com</a>' in html
     assert "&lt;span" not in html
     assert 'class="contact"' in html
+    assert "size: A4" in html
+    assert "page-break-inside: auto" in html
     assert target.exists() and target.stat().st_size > 1000
+    document = DocxDocument(str(target))
+    assert round(document.sections[0].page_width.mm) == 210
+    assert round(document.sections[0].page_height.mm) == 297
     checks = check_docx(resume, target)
     assert checks
     assert all(check.passed for check in checks)

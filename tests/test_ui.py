@@ -29,12 +29,21 @@ def test_ui_exposes_portal_and_extension_controls() -> None:
     assert "Resume your work" in html
     assert "Start new session" in html
     assert "New user? Create account" in html
+    assert 'id="auth-forgot"' in html
+    assert 'id="recovery-dialog"' in html
+    assert 'id="session-dialog"' in html
+    assert 'id="history-add-button"' in html
+    assert "Add session" in html
     assert 'id="status-strip"' in html
     assert "setAuthMode" in script
     assert "validateAuth" in script
     assert "function showResumeDialog" in script
     assert "function startNewSession" in script
     assert "function historyButton" in script
+    assert "function openSessionDialog" in script
+    assert "function saveSessionDetails" in script
+    assert "function createRecoveryCode" in script
+    assert "/api/auth/reset" in script
     assert "error.status = response.status" in script
     assert '$("status-strip").hidden = true' in script
     assert "updateProfileStatus" in script

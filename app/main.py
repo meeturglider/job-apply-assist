@@ -45,6 +45,13 @@ class AnalyzeRequest(BaseModel):
     company: str = Field(default="", max_length=200)
     role: str = Field(default="", max_length=200)
     profile_urls: list[str] = Field(default_factory=list, max_length=5)
+    application_id: str = Field(default="", max_length=120)
+
+
+class ApplicationDetailsRequest(BaseModel):
+    company: str = Field(default="", max_length=200)
+    role: str = Field(default="", max_length=200)
+    source_url: str = Field(default="", max_length=2048)
 
 
 class ResumeUploadRequest(BaseModel):
@@ -61,6 +68,20 @@ class NotesRequest(BaseModel):
     notes: list[NoteInput] = Field(default_factory=list, max_length=25)
 
 
+def _validated_email(value: str) -> str:
+    email = value.strip()
+    if (
+        len(email) < 3
+        or len(email) > 320
+        or "@" not in email
+        or email.startswith("@")
+        or email.endswith("@")
+        or any(character.isspace() for character in email)
+    ):
+        raise ValueError("Enter a valid email address.")
+    return email
+
+
 class AccountRequest(BaseModel):
     email: str
     password: str
@@ -68,17 +89,7 @@ class AccountRequest(BaseModel):
     @field_validator("email")
     @classmethod
     def validate_email(cls, value: str) -> str:
-        email = value.strip()
-        if (
-            len(email) < 3
-            or len(email) > 320
-            or "@" not in email
-            or email.startswith("@")
-            or email.endswith("@")
-            or any(character.isspace() for character in email)
-        ):
-            raise ValueError("Enter a valid email address.")
-        return email
+        return _validated_email(value)
 
     @field_validator("password")
     @classmethod
@@ -86,6 +97,17 @@ class AccountRequest(BaseModel):
         if len(value) < 8 or len(value) > 200:
             raise ValueError("Use a password of at least 8 characters.")
         return value
+
+
+class RecoveryResetRequest(BaseModel):
+    email: str
+    recovery_code: str = Field(min_length=12, max_length=40)
+    new_password: str = Field(min_length=8, max_length=200)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return _validated_email(value)
 
 
 class ContactRequest(BaseModel):
@@ -466,7 +488,7 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         assert accounts is not None and sessions is not None
         if not active_settings.allow_registration:
             raise HTTPException(status_code=403, detail="Registration is disabled.")
-        account = accounts.create(payload.email, payload.password)
+        account, recovery_code = accounts.create_with_recovery(payload.email, payload.password)
         if account is None:
             raise HTTPException(
                 status_code=409,
@@ -482,6 +504,8 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         return {
             "account": {"email": account.email},
             "csrf_token": session.csrf_token,
+            "recovery_code": recovery_code,
+            "needs_recovery_code": False,
             "session_only": False,
         }
 
@@ -502,8 +526,41 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
         return {
             "account": {"email": account.email},
             "csrf_token": session.csrf_token,
+            "needs_recovery_code": not accounts.needs_recovery_code(account.id),
             "session_only": False,
         }
+
+    @app.post("/api/auth/reset")
+    async def reset_password(payload: RecoveryResetRequest) -> dict[str, object]:
+        _require_portal()
+        assert accounts is not None and sessions is not None
+        account, recovery_code = accounts.reset_password(
+            payload.email, payload.recovery_code, payload.new_password
+        )
+        if account is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid email, recovery code, or password. Check the code and try again.",
+            )
+        sessions.delete_for_user(account.id)
+        return {
+            "account": {"email": account.email},
+            "recovery_code": recovery_code,
+            "needs_recovery_code": False,
+            "session_only": False,
+        }
+
+    @app.post("/api/account/recovery-code")
+    async def create_recovery_code(request: Request) -> dict[str, object]:
+        _require_portal()
+        assert accounts is not None
+        session = request.state.session
+        if session is None:
+            raise HTTPException(status_code=401, detail="Sign in to continue.")
+        recovery_code = accounts.set_recovery_code(session.user_id)
+        if not recovery_code:
+            raise HTTPException(status_code=404, detail="Account not found.")
+        return {"recovery_code": recovery_code}
 
     @app.post("/api/auth/logout")
     async def logout(request: Request, response: Response) -> dict[str, object]:
@@ -518,6 +575,7 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
     @app.get("/api/auth/me")
     async def me(request: Request) -> dict[str, object]:
         _require_portal()
+        assert accounts is not None
         session = request.state.session
         if session is None:
             raise HTTPException(status_code=401, detail="Sign in to continue.")
@@ -525,6 +583,7 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             "account": {"email": session.email},
             "session_only": False,
             "csrf_token": session.csrf_token,
+            "needs_recovery_code": not accounts.needs_recovery_code(session.user_id),
         }
 
     @app.get("/api/health")
@@ -594,19 +653,49 @@ def create_app(custom_settings: Settings | None = None) -> FastAPI:
             "master_resume_exists"
         ):
             raise HTTPException(status_code=422, detail="Upload a resume before analyzing a job.")
-        record = _workspace(request).start_analysis(
-            url=payload.url.strip(),
-            text=payload.text.strip(),
-            company=payload.company.strip(),
-            role=payload.role.strip(),
-            profile_urls=_clean_profile_urls(payload.profile_urls),
-        )
+        try:
+            record = _workspace(request).start_analysis(
+                url=payload.url.strip(),
+                text=payload.text.strip(),
+                company=payload.company.strip(),
+                role=payload.role.strip(),
+                profile_urls=_clean_profile_urls(payload.profile_urls),
+                application_id=payload.application_id.strip(),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"application": record.model_dump(mode="json")}
 
     @app.get("/api/applications")
     async def applications(request: Request) -> dict[str, object]:
         records = _workspace(request).list()
         return {"applications": [record.model_dump(mode="json") for record in records]}
+
+    @app.post("/api/applications/manual")
+    async def create_manual_session(
+        request: Request, payload: ApplicationDetailsRequest
+    ) -> dict[str, object]:
+        record = _workspace(request).create_manual_draft(
+            company=payload.company,
+            role=payload.role,
+            source_url=payload.source_url,
+        )
+        return {"application": record.model_dump(mode="json")}
+
+    @app.patch("/api/applications/{application_id}/details")
+    async def update_application_details(
+        request: Request, application_id: str, payload: ApplicationDetailsRequest
+    ) -> dict[str, object]:
+        try:
+            record = _workspace(request).update_details(
+                application_id,
+                company=payload.company,
+                role=payload.role,
+                source_url=payload.source_url,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"application": record.model_dump(mode="json")}
 
     @app.get("/api/applications/{application_id}/status")
     async def application_status(request: Request, application_id: str) -> dict[str, object]:

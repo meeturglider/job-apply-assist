@@ -66,25 +66,34 @@ per-user sign-in, use portal mode below instead of `SHARED_PASSWORD`.
 ### Private apply portal
 
 Set `PORTAL_MODE=true` and restart the server. Accounts are stored as email/password hashes
-in `data/accounts.db`; candidate data is stored separately under `data/users/<account_id>/`.
-Session cookies identify the user and carry a CSRF token for all unsafe API calls. Signing in
-loads that account's durable application store, profile service, and generated artifacts, so
-a server restart does not lose work. Signing out or expiring the session only ends the login;
-the saved history remains and the UI asks whether to resume a prior application or start new.
+and recovery-code hashes in `data/accounts.db`; candidate data is stored separately under
+`data/users/<account_id>/`. Session cookies identify the user and carry a CSRF token for all
+unsafe API calls. Signing in loads that account's durable application store, profile service,
+and generated artifacts, so a server restart does not lose work. Signing out or expiring the
+session only ends the login; the saved history remains and the UI asks whether to resume a
+prior application or start new.
 
 The portal UI adds:
 
 - per-session resume upload and profile indicator; selecting a resume file uploads it
   immediately and the indicator tracks that session's workspace;
 - a tracker for draft, analyzed, email drafted, prefilled, and submitted states;
+- a one-time recovery code shown at registration or generated from the header, with a
+  **Forgot password?** flow that resets the password without email or SMS;
+- history editing for company, role, and source URL, plus manual draft sessions that can be
+  analyzed in place;
+- metadata edits update generated labels and rerender PDF/DOCX from the existing resume text;
 - public contact extraction from job JSON-LD, `mailto:` links, and page text;
 - a deterministic, evidence-grounded outreach draft plus a `mailto:` link;
 - a prefill payload for the companion extension.
 
-The auth card switches between **Sign in** and **New user? Create account**. Invalid email
-addresses and short passwords are rejected in the browser with a specific message before a
-request is sent; API validation uses the same messages. When registration is disabled with
-`ALLOW_REGISTRATION=false`, the create-account option is hidden.
+Resumes render on A4 with compact single-column spacing, organized section headings, and page
+break rules that keep titles with their following content.
+
+The auth card switches between **Sign in**, **New user? Create account**, and **Forgot password?**
+(recovery code + new password). Invalid email addresses and short passwords are rejected in the
+browser with a specific message before a request is sent; API validation uses the same messages.
+When registration is disabled with `ALLOW_REGISTRATION=false`, the create-account option is hidden.
 
 Load `extension/` as an unpacked Chrome extension.
  After clicking **Fill open application**
@@ -235,15 +244,18 @@ Included:
 - PDF, DOCX, HTML, and Markdown exports
 - Truthfulness validation and sanitization
 - ATS checks and application history
+- A4 PDF/DOCX layout with compact single-column spacing and organized headings
 - Optional per-user portal with durable history, trackers, and artifacts
+- Recovery-code password reset without email or SMS
+- Editable session company, role, and source URL with artifact-preserving rerender
+- Manual draft sessions that can be analyzed in place
 - Public contact discovery, outreach drafts, and reviewed form prefill
 
 Not included:
 
 - Automatic job applications or unattended form submission
-- Server-side SMTP delivery
+- Email or SMS delivery; password recovery uses a one-time recovery code
 - LinkedIn credential automation or scraping behind a login
-- Persistent candidate profiles, resumes, drafts, or tracker history in portal mode
 - Fabricated metrics, skills, or experience
 - Recruiter/outcome analytics beyond the local application index
 

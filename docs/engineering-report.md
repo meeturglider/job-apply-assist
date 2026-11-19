@@ -221,15 +221,20 @@ evidence by the same claim validator used for the canonical resume.
 ## Private Apply Portal
 
 `PORTAL_MODE=true` enables real accounts with durable per-account candidate data. `AccountStore`
-uses PBKDF2-SHA256 password hashes in a private SQLite database. `SessionManager` keeps login
-sessions in memory and prunes expired entries; each login loads the account's workspace from
+uses PBKDF2-SHA256 password and recovery-code hashes in a private SQLite database. Registration
+returns a one-time recovery code, signed-in users can rotate it through a CSRF-protected
+endpoint, and `/api/auth/reset` accepts email + code + new password without email or SMS.
+Reset rotates the code, invalidates all sessions for that user, and uses generic failures plus
+attempt lockout to limit account enumeration and guessing. `SessionManager` keeps login sessions
+in memory and prunes expired entries; each login loads the account's workspace from
 `data/users/<account_id>/` with its own application store, profile service, and artifacts.
 Restart recovery marks interrupted runs as errors so they can be started again. Session and
 CSRF cookies are `HttpOnly`/`SameSite=Lax` as appropriate, and every unsafe API
 method requires the CSRF header to match the session token. Rate-limit keys become
 `user:<id>` for signed-in sessions and `ip:<address>` for unauthenticated portal requests.
-After sign-in the UI shows saved applications for selection or offers a new session; clearing
-stale browser drafts prevents an old application ID from being used after restart.
+After sign-in the UI shows saved applications for selection, editing, or a new session; clearing
+stale browser drafts prevents an old application ID from being used after restart. Manual draft
+sessions are `draft`-status records that can be analyzed in place without creating duplicates.
 
 `app/jd/contacts.py` extracts public recruiter candidates from JSON-LD `applicationContact`,
 `mailto:` links, and page text. It does not authenticate to LinkedIn or scrape private pages.
@@ -247,6 +252,11 @@ a form.
 
 HTML and Markdown artifacts are previewable inline; downloads force attachment semantics.
 All artifacts are served with `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`.
+PDF and DOCX both use A4 page dimensions with compact single-column spacing. Section headings
+keep with following content, and experience/project entries may break across pages so a title
+is not stranded alone at the bottom of a page. Editing session company, role, or source URL
+updates the record plus job/analysis/metadata labels, then rerenders existing resume content
+with method `details-update`; it never re-tailors or overwrites manual resume edits.
 
 PDF checks include selectable text, page count, contact details, candidate identity,
 experience coverage, standard sections, absence of ATS-breaking tables, keyword coverage,
@@ -273,8 +283,9 @@ details, and experience coverage. DOCX checks still run when PDF rendering is un
   Rejections return structured `429` responses with `Retry-After`.
 - Portal mode replaces Basic auth with account sessions and requires a CSRF header for unsafe
   requests; API responses still use `Cache-Control: no-store`.
-- Portal application, profile, note, draft, and artifact data exists only in the owning
-  session's memory; account identity is the sole persisted user record.
+- Portal application, profile, note, draft, and artifact data persists only under the owning
+  account's directory; account identity, password hash, and recovery-code hash are the only
+  persisted user records.
 
 ## Verification
 

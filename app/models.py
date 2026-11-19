@@ -510,6 +510,8 @@ class ApplicationRecord(BaseModel):
             return 0
         if self.status == "generating":
             return {"tailoring": 35, "rendering": 75}.get(self.stage, 15)
+        if self.status == "draft":
+            return 5
         return {
             "queued": 5,
             "fetching": 15,

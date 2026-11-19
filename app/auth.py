@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import hmac
+import re
 import secrets
 import sqlite3
 import time
@@ -16,6 +17,8 @@ SESSION_COOKIE = "jobassist_session"
 CSRF_COOKIE = "jobassist_csrf"
 CSRF_HEADER = "x-csrf-token"
 _PBKDF2_ITERATIONS = 200_000
+_RECOVERY_MAX_ATTEMPTS = 5
+_RECOVERY_LOCK_SECONDS = 900
 
 
 @dataclass(frozen=True)
@@ -23,6 +26,7 @@ class Account:
     id: str
     email: str
     created_at: str
+    has_recovery_code: bool = False
 
 
 @dataclass
@@ -63,10 +67,25 @@ class AccountStore:
                     id TEXT PRIMARY KEY,
                     email TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    recovery_hash TEXT,
+                    recovery_created_at TEXT,
+                    recovery_attempts INTEGER NOT NULL DEFAULT 0,
+                    recovery_locked_until REAL
                 )
                 """
             )
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(accounts)")}
+            if "recovery_hash" not in columns:
+                connection.execute("ALTER TABLE accounts ADD COLUMN recovery_hash TEXT")
+            if "recovery_created_at" not in columns:
+                connection.execute("ALTER TABLE accounts ADD COLUMN recovery_created_at TEXT")
+            if "recovery_attempts" not in columns:
+                connection.execute(
+                    "ALTER TABLE accounts ADD COLUMN recovery_attempts INTEGER NOT NULL DEFAULT 0"
+                )
+            if "recovery_locked_until" not in columns:
+                connection.execute("ALTER TABLE accounts ADD COLUMN recovery_locked_until REAL")
 
     @staticmethod
     def normalize_email(value: str) -> str:
@@ -92,33 +111,164 @@ class AccountStore:
         supplied = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
         return hmac.compare_digest(supplied, expected)
 
-    def create(self, email: str, password: str) -> Account | None:
+    @staticmethod
+    def normalize_recovery_code(value: str) -> str:
+        return re.sub(r"[^A-Z0-9]", "", value.upper())
+
+    @staticmethod
+    def generate_recovery_code() -> str:
+        alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        groups = ["".join(secrets.choice(alphabet) for _ in range(5)) for _ in range(4)]
+        return "-".join(groups)
+
+    @staticmethod
+    def _account_from_row(row: sqlite3.Row) -> Account:
+        return Account(
+            id=row["id"],
+            email=row["email"],
+            created_at=row["created_at"],
+            has_recovery_code=bool(row["recovery_hash"]),
+        )
+
+    def create_with_recovery(self, email: str, password: str) -> tuple[Account | None, str]:
         normalized = self.normalize_email(email)
         if not normalized or "@" not in normalized or len(password) < 8:
-            return None
+            return None, ""
         account_id = secrets.token_urlsafe(18)
         created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        recovery_code = self.generate_recovery_code()
         try:
             with self._connect() as connection:
                 connection.execute(
-                    "INSERT INTO accounts (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
-                    (account_id, normalized, self.hash_password(password), created_at),
+                    """
+                    INSERT INTO accounts (
+                        id, email, password_hash, created_at, recovery_hash, recovery_created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        account_id,
+                        normalized,
+                        self.hash_password(password),
+                        created_at,
+                        self.hash_password(self.normalize_recovery_code(recovery_code)),
+                        created_at,
+                    ),
                 )
         except sqlite3.IntegrityError:
-            return None
+            return None, ""
         self._secure_database()
-        return Account(id=account_id, email=normalized, created_at=created_at)
+        return (
+            Account(
+                id=account_id,
+                email=normalized,
+                created_at=created_at,
+                has_recovery_code=True,
+            ),
+            recovery_code,
+        )
+
+    def create(self, email: str, password: str) -> Account | None:
+        account, _ = self.create_with_recovery(email, password)
+        return account
+
+    def set_recovery_code(self, account_id: str) -> str:
+        recovery_code = self.generate_recovery_code()
+        created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE accounts
+                SET recovery_hash = ?, recovery_created_at = ?,
+                    recovery_attempts = 0, recovery_locked_until = NULL
+                WHERE id = ?
+                """,
+                (
+                    self.hash_password(self.normalize_recovery_code(recovery_code)),
+                    created_at,
+                    account_id,
+                ),
+            )
+        return recovery_code if cursor.rowcount else ""
+
+    def needs_recovery_code(self, account_id: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT recovery_hash FROM accounts WHERE id = ?", (account_id,)
+            ).fetchone()
+        return bool(row and row["recovery_hash"])
 
     def authenticate(self, email: str, password: str) -> Account | None:
         normalized = self.normalize_email(email)
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT id, email, password_hash, created_at FROM accounts WHERE email = ?",
+                """
+                SELECT id, email, password_hash, created_at, recovery_hash
+                FROM accounts WHERE email = ?
+                """,
                 (normalized,),
             ).fetchone()
         if row is None or not self.verify_password(password, row["password_hash"]):
             return None
-        return Account(id=row["id"], email=row["email"], created_at=row["created_at"])
+        return self._account_from_row(row)
+
+    def reset_password(
+        self, email: str, recovery_code: str, new_password: str
+    ) -> tuple[Account | None, str]:
+        normalized = self.normalize_email(email)
+        normalized_code = self.normalize_recovery_code(recovery_code)
+        if (
+            not normalized
+            or "@" not in normalized
+            or len(normalized_code) < 16
+            or len(new_password) < 8
+        ):
+            return None, ""
+        now = time.time()
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, email, created_at, recovery_hash, recovery_attempts,
+                       recovery_locked_until
+                FROM accounts WHERE email = ?
+                """,
+                (normalized,),
+            ).fetchone()
+            if row is None or not row["recovery_hash"]:
+                return None, ""
+            locked_until = row["recovery_locked_until"] or 0
+            if locked_until and locked_until > now:
+                return None, ""
+            if not self.verify_password(normalized_code, row["recovery_hash"]):
+                attempts = int(row["recovery_attempts"] or 0) + 1
+                new_lock = now + _RECOVERY_LOCK_SECONDS if attempts >= _RECOVERY_MAX_ATTEMPTS else 0
+                connection.execute(
+                    "UPDATE accounts SET recovery_attempts = ?, recovery_locked_until = ? WHERE id = ?",
+                    (attempts, new_lock or None, row["id"]),
+                )
+                return None, ""
+            next_code = self.generate_recovery_code()
+            created_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            connection.execute(
+                """
+                UPDATE accounts
+                SET password_hash = ?, recovery_hash = ?, recovery_created_at = ?,
+                    recovery_attempts = 0, recovery_locked_until = NULL
+                WHERE id = ?
+                """,
+                (
+                    self.hash_password(new_password),
+                    self.hash_password(next_code),
+                    created_at,
+                    row["id"],
+                ),
+            )
+            account = Account(
+                id=row["id"],
+                email=row["email"],
+                created_at=row["created_at"],
+                has_recovery_code=True,
+            )
+        return account, next_code
 
 
 class SessionManager:
@@ -150,6 +300,11 @@ class SessionManager:
 
     def delete(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
+
+    def delete_for_user(self, user_id: str) -> None:
+        expired = [key for key, session in self._sessions.items() if session.user_id == user_id]
+        for key in expired:
+            self._sessions.pop(key, None)
 
     def all(self) -> list[Session]:
         self.prune()

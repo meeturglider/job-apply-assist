@@ -23,7 +23,7 @@ async def render_pdf(html: str, output_path: Path) -> Path:
                 await page.emulate_media(media="print")
                 await page.pdf(
                     path=str(output_path),
-                    format="Letter",
+                    format="A4",
                     print_background=True,
                     prefer_css_page_size=True,
                 )

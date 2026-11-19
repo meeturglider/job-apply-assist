@@ -182,8 +182,23 @@ class ApplicationService:
         company: str = "",
         role: str = "",
         profile_urls: list[str] | None = None,
+        application_id: str = "",
     ) -> ApplicationRecord:
-        record = self._new_record(company, role, url, profile_urls)
+        if application_id:
+            record = self.store.get(application_id)
+            if record is None:
+                raise ValueError("Application not found.")
+            if record.status != "draft":
+                raise ValueError("Only draft sessions can be analyzed in place.")
+            record = self._update(
+                record,
+                company=company or record.company,
+                role=role or record.role,
+                source_url=url or record.source_url,
+                profile_urls=profile_urls or record.profile_urls,
+            )
+        else:
+            record = self._new_record(company, role, url, profile_urls)
         task = asyncio.create_task(
             self._analyze(
                 record.id,
@@ -196,6 +211,113 @@ class ApplicationService:
         )
         self._track(task)
         return record
+
+    def create_manual_draft(
+        self,
+        *,
+        company: str = "",
+        role: str = "",
+        source_url: str = "",
+        profile_urls: list[str] | None = None,
+    ) -> ApplicationRecord:
+        record = self._new_record(company, role, source_url, profile_urls)
+        return self._update(
+            record,
+            status="draft",
+            stage="draft",
+            message="Draft session created. Add a job description to analyze it.",
+        )
+
+    def update_details(
+        self,
+        application_id: str,
+        *,
+        company: str = "",
+        role: str = "",
+        source_url: str = "",
+    ) -> ApplicationRecord:
+        record = self.store.get(application_id)
+        if record is None:
+            raise ValueError("Application not found.")
+        record = self._update(
+            record,
+            company=company.strip(),
+            role=role.strip(),
+            source_url=source_url.strip(),
+        )
+        self._update_artifact_labels(application_id, company, role, source_url)
+        if record.status == "generated" and self._exists(application_id, "resume.json"):
+            record = self._update(
+                record,
+                status="generating",
+                stage="rendering",
+                message="Refreshing documents with updated job details...",
+            )
+            task = asyncio.create_task(self._rerender_details(application_id))
+            self._track(task)
+        return record
+
+    def _update_artifact_labels(
+        self, application_id: str, company: str, role: str, source_url: str
+    ) -> None:
+        updates = {
+            "job.json": lambda data: (
+                data.__setitem__("title", role.strip()),
+                data.__setitem__("company", company.strip()),
+                data.__setitem__("source_url", source_url.strip()),
+            ),
+            "metadata.json": lambda data: (
+                data.__setitem__("job_title", role.strip()),
+                data.__setitem__("company", company.strip()),
+            ),
+        }
+        for filename, mutate in updates.items():
+            if not self._exists(application_id, filename):
+                continue
+            data = json.loads(self._read_text(application_id, filename))
+            mutate(data)
+            self._write(application_id, filename, json.dumps(data, indent=2, ensure_ascii=False))
+        if self._exists(application_id, "analysis.json"):
+            data = json.loads(self._read_text(application_id, "analysis.json"))
+            job_data = data.get("job")
+            if isinstance(job_data, dict):
+                job_data["title"] = role.strip()
+                job_data["company"] = company.strip()
+                job_data["source_url"] = source_url.strip()
+                self._write(
+                    application_id, "analysis.json", json.dumps(data, indent=2, ensure_ascii=False)
+                )
+
+    async def _rerender_details(self, application_id: str) -> None:
+        record = self.store.get(application_id)
+        if record is None:
+            return
+        try:
+            job = JobDescription.model_validate_json(self._read_text(application_id, "job.json"))
+            profile = self._read_profile(application_id)
+            resume = TailoredResume.model_validate_json(
+                self._read_text(application_id, "resume.json")
+            )
+            validation = validate_resume(resume, profile, job)
+            errors = [issue.message for issue in validation.issues if issue.severity == "error"]
+            if errors:
+                raise ValueError(errors[0])
+            await self._render_resume(
+                application_id,
+                resume=resume,
+                validation=validation,
+                method="details-update",
+                error="Job details updated. Documents refreshed.",
+            )
+        except Exception:
+            logger.exception("details_rerender_failed", extra={"application_id": application_id})
+            self._update(
+                record,
+                status="error",
+                stage="error",
+                message="Documents could not be refreshed. Check the app logs for details.",
+                error="internal_error",
+            )
 
     async def _analyze(
         self,
@@ -210,6 +332,7 @@ class ApplicationService:
         record = self.store.get(application_id)
         if record is None:
             return
+        source_url = url or record.source_url
         logger.info("analysis_started", extra={"application_id": application_id})
         try:
             self._update(
@@ -218,7 +341,7 @@ class ApplicationService:
                 stage="fetching",
                 message="Fetching the job description...",
             )
-            extraction = await self._ingest(url=url, text=text)
+            extraction = await self._ingest(url=source_url, text=text)
             extraction = JobExtraction(
                 text=extraction.text,
                 title=role or extraction.title,
@@ -227,7 +350,7 @@ class ApplicationService:
                 employment_type=extraction.employment_type,
                 method=extraction.method,
                 warnings=extraction.warnings,
-                source_url=url or extraction.source_url,
+                source_url=source_url or extraction.source_url,
                 job_posting=extraction.job_posting,
             )
             self._save_jd(application_id, extraction)
@@ -243,7 +366,7 @@ class ApplicationService:
                 title=extraction.title,
                 company=extraction.company,
                 location=extraction.location,
-                source_url=url or extraction.source_url,
+                source_url=source_url or extraction.source_url,
             )
 
             self._update(
@@ -265,7 +388,7 @@ class ApplicationService:
             contacts = extract_contacts(
                 extraction.text,
                 job_posting=extraction.job_posting,
-                source_url=url or extraction.source_url,
+                source_url=source_url or extraction.source_url,
             )
             job.contacts = contacts
             self._update(

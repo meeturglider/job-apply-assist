@@ -7,7 +7,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Mm, Pt
 
 from app.models import TailoredResume
 
@@ -33,8 +33,9 @@ def _set_cell_border(paragraph, size: int = 6) -> None:
 
 def _section_heading(document: DocxDocument, text: str) -> None:
     paragraph = document.add_paragraph()
-    paragraph.paragraph_format.space_before = Pt(7)
+    paragraph.paragraph_format.space_before = Pt(5)
     paragraph.paragraph_format.space_after = Pt(2)
+    paragraph.paragraph_format.keep_with_next = True
     run = paragraph.add_run(text.upper())
     run.bold = True
     run.font.size = Pt(10)
@@ -46,6 +47,7 @@ def _bullet(document: DocxDocument, text: str) -> None:
     paragraph.paragraph_format.space_after = Pt(1)
     paragraph.paragraph_format.left_indent = Inches(0.18)
     paragraph.paragraph_format.line_spacing = 1.0
+    paragraph.paragraph_format.keep_together = True
     for run in paragraph.runs:
         run.font.size = Pt(10)
 
@@ -59,10 +61,12 @@ def _date_range(start: str, end: str) -> str:
 def render_docx(resume: TailoredResume, output_path: Path) -> Path:
     document = Document()
     section = document.sections[0]
-    section.top_margin = Inches(0.5)
-    section.bottom_margin = Inches(0.5)
-    section.left_margin = Inches(0.58)
-    section.right_margin = Inches(0.58)
+    section.page_width = Mm(210)
+    section.page_height = Mm(297)
+    section.top_margin = Mm(13)
+    section.bottom_margin = Mm(13)
+    section.left_margin = Mm(15)
+    section.right_margin = Mm(15)
 
     styles = document.styles
     normal = styles["Normal"]
@@ -76,7 +80,7 @@ def render_docx(resume: TailoredResume, output_path: Path) -> Path:
     name.alignment = WD_ALIGN_PARAGRAPH.CENTER
     name_run = name.add_run(header.name)
     name_run.bold = True
-    name_run.font.size = Pt(21)
+    name_run.font.size = Pt(20)
     name.paragraph_format.space_after = Pt(1)
 
     if header.title:
@@ -125,15 +129,19 @@ def render_docx(resume: TailoredResume, output_path: Path) -> Path:
                 company = document.add_paragraph()
                 company.paragraph_format.space_before = Pt(3)
                 company.paragraph_format.space_after = Pt(0)
+                company.paragraph_format.keep_with_next = True
                 company_run = company.add_run(entry.company)
                 company_run.bold = True
                 company_run.font.size = Pt(10)
                 if entry.location:
                     location_run = company.add_run(f"  |  {entry.location}")
                     location_run.font.size = Pt(9)
-                for role in entry.roles:
+                for index, role in enumerate(entry.roles):
                     role_paragraph = document.add_paragraph()
                     role_paragraph.paragraph_format.space_after = Pt(0)
+                    role_paragraph.paragraph_format.keep_with_next = index < len(
+                        entry.roles
+                    ) - 1 or bool(entry.bullets)
                     role_run = role_paragraph.add_run(role.role)
                     role_run.bold = True
                     role_run.font.size = Pt(9.5)
@@ -145,6 +153,7 @@ def render_docx(resume: TailoredResume, output_path: Path) -> Path:
                 role_line = document.add_paragraph()
                 role_line.paragraph_format.space_before = Pt(3)
                 role_line.paragraph_format.space_after = Pt(0)
+                role_line.paragraph_format.keep_with_next = True
                 role_run = role_line.add_run(entry.role)
                 role_run.bold = True
                 role_run.font.size = Pt(10)
@@ -155,6 +164,7 @@ def render_docx(resume: TailoredResume, output_path: Path) -> Path:
 
                 company = document.add_paragraph()
                 company.paragraph_format.space_after = Pt(1)
+                company.paragraph_format.keep_with_next = bool(entry.bullets)
                 company_run = company.add_run(
                     " | ".join(value for value in [entry.company, entry.location] if value)
                 )
@@ -170,6 +180,9 @@ def render_docx(resume: TailoredResume, output_path: Path) -> Path:
             title = document.add_paragraph()
             title.paragraph_format.space_before = Pt(3)
             title.paragraph_format.space_after = Pt(0)
+            title.paragraph_format.keep_with_next = bool(
+                project.context or project.bullets or project.technologies
+            )
             title_run = title.add_run(project.name)
             title_run.bold = True
             title_run.font.size = Pt(10)
@@ -179,6 +192,9 @@ def render_docx(resume: TailoredResume, output_path: Path) -> Path:
             if project.context:
                 context = document.add_paragraph()
                 context.paragraph_format.space_after = Pt(1)
+                context.paragraph_format.keep_with_next = bool(
+                    project.bullets or project.technologies
+                )
                 context_run = context.add_run(project.context)
                 context_run.font.size = Pt(9)
                 context_run.italic = True
