@@ -1,108 +1,90 @@
 # Harisankar
 
-## Senior Cloud Architect | Platform Engineering | DevOps | AI Infrastructure
+## Senior Cloud Architect | Enterprise AI Transformation | Cloud Operations
 
 📍 Hyderabad, India
 📧 [pnharisankar@outlook.com](mailto:pnharisankar@outlook.com)
 📞 +91-9600124898
 🔗 LinkedIn: [https://www.linkedin.com/in/pnhari](https://www.linkedin.com/in/pnhari)
+🔗 Portfolio: [https://hari.is-a.dev](https://hari.is-a.dev)
 
 ---
 
 # PROFESSIONAL SUMMARY
 
-Senior Cloud Architect with 16 years of experience in Cloud Architecture, DevOps, Platform Engineering, Infrastructure Automation, Kubernetes, CI/CD, Cloud Security, and AI-driven operational transformation.
-
-Experienced in designing enterprise-scale cloud-native platforms using GCP, AWS, Kubernetes, Docker, Terraform, Linux automation, and Generative AI technologies including Vertex AI and Gemini Enterprise.
-
-Strong engineering leader with expertise in infrastructure automation, operational excellence, cloud modernization, platform reliability, and AI-assisted operational workflows.
+Senior Cloud Architect with 15+ years of experience across enterprise cloud architecture, platform engineering, global cloud support operations and AI solution delivery. Owned GCP support delivery operations at Google Operations Center; transitioned in April 2025 into AI solution architecture and engineering leadership at Cognizant, leading the engineering pod and delivering CORE, a production AI assessment platform that identified 26 of 124 interview-cleared candidates as unsuitable before project onboarding. Hands-on with Generative AI, LLMs, RAG, Gemini and agentic workflows, with business stakeholder engagement and end-to-end solution architecture from opportunity identification and technical design through engineering delivery.
 
 ---
 
 # CORE SKILLS
 
-## Cloud & Infrastructure
+## AI & Agentic Systems
+
+* Generative AI
+* Large Language Models (LLMs)
+* RAG
+* Agentic AI
+* Gemini
+* Gemini Enterprise
+* Vertex AI
+* Vertex AI Search
+* Google ADK
+* Agent Builder
+
+## Cloud & Solution Architecture
 
 * Google Cloud Platform (GCP)
+* Enterprise cloud architecture
+* Secure and scalable platform design
 * Amazon Web Services (AWS)
+* Cloud Run
 * Kubernetes
 * Docker
-* Cloud Run
-* Linux Administration
-* Infrastructure Architecture
-* Distributed Systems
+
+## AI Solution Engineering
+
+* AI workflow design
+* Knowledge retrieval and grounding
+* Integrations
+* Solution architecture
+* PoC-to-delivery lifecycle
+* Python
+* FastAPI
+* BigQuery
+* Spanner Graph
+* PostgreSQL
+
+## Cloud Operations & Service Delivery
+
+* GCP support operations
+* SLA compliance
+* Customer Effort Score (CES)
+* Time to Mitigate (TTM)
+* Quality assurance
+* Productivity
+* Queue Management
+* Critical escalation management
+* CloudWatch
 
 ## Infrastructure as Code & Automation
 
 * Terraform
 * Ansible
-* Python
-* Shell/Bash
-* Infrastructure Automation
-* Cloud Automation
-
-## DevOps & CI/CD
-
 * Jenkins
 * CloudBees Jenkins
-* Cloud Build
-* GitHub
-* SVN
 * CI/CD Pipelines
-* Deployment Automation
+* Infrastructure Automation
+* Linux Administration
 
-## AI & Platform Engineering
+## Leadership & Business Engagement
 
-* Vertex AI
-* Gemini Enterprise
-* Gemini
-* Agent Harness
-* ADK
-* Agent Builder
-* Agent2Agent (A2A)
-* Model Armor
-* OPA/Rego
-* RAG
-* Vector Search
-* LLM Workflow Automation
-* AI Infrastructure
-* AI Operational Tooling
-* Platform Engineering
-
-## Data & Application Engineering
-
-* BigQuery
-* Spanner
-* Spanner Graph
-* Cloud SQL
-* PostgreSQL
-* Redis
-* Pub/Sub
-* FastAPI
-* Angular
-* Next.js
-* WebSocket
-* WebRTC
-* MediaPipe
-* Pydantic
-
-## Security & Networking
-
-* IAM
-* VPC
-* SCC
-* VPN
-* VPC Peering
-* Network Security
-* Bastion Access
-
-## Monitoring & Operations
-
-* CloudWatch
-* Logging
-* Metrics Dashboards
-* Incident Handling
-* Operational Excellence
+* Engineering leadership
+* Cross-site delivery coordination
+* Stakeholder engagement
+* Stakeholder Management
+* Business Requirements Documents (BRDs)
+* Technical Design (TD) documents
+* Solution approvals
 
 ---
 
@@ -114,98 +96,32 @@ Strong engineering leader with expertise in infrastructure automation, operation
 
 📅 Aug 2024 – Present | Hyderabad
 
-### Digital SME – Proactive Intelligence Workflow
+* Served as Senior Cloud Architect from August 2024 to March 2025; transitioned in April 2025 into AI solution architecture and engineering leadership responsibilities.
+* Lead the engineering pod, driving architecture and engineering delivery across engagement AI initiatives.
+* Served as cross-site delivery synergy lead for India, Romania and Israel for approximately six months, aligning teams and strengthening operational coordination and delivery hand-offs.
+* Own end-to-end AI solution architecture, including business problem understanding, solution strategy, LLM and technology selection, RAG and agentic workflow design, integrations, cloud infrastructure, security and scalability decisions.
+* Engage Google VMO business stakeholders who sponsor the initiatives; explain proposed solutions, prepare and submit Business Requirements Documents (BRDs) and Technical Design (TD) documents, and obtain approval before development.
+* Led architecture and engineering delivery of CORE, an AI-driven practical technical assessment platform used as a pre-onboarding quality gate; identified 26 of 124 interview-cleared candidates as unsuitable before project onboarding and reduced training duration from 8 weeks to 6 weeks (25%).
+* Guide initiatives from business opportunity identification and solution design through proof of concept and delivery, distinguishing production deployments from PoCs.
+* Additional initiatives in PoC stage: E360, Digital SME and AI Technical Interviewer.
 
-Designed and implemented an AI-driven operational intelligence platform using Vertex AI, Gemini Enterprise, and Cloud Run to modernize enterprise support operations.
-
-### Key Contributions
-
-* Built intelligent customer prioritization workflows using escalation trends and customer operational data.
-* Led GCP operations teams across India and Europe.
-* Developed AI-powered automated case review systems for identifying high-risk support cases.
-* Implemented Gemini Enterprise chatbot solutions using curated operational datasets.
-* Designed proactive automation workflows reducing manual troubleshooting effort.
-* Contributed toward:
-
-  * 20% projected support productivity improvement
-  * 10% reduction in consult rates and escalations
-
-### C.O.R.E – Comprehensive Online Review of Expertise
-
-Architected a full-stack AI-powered assessment platform using Angular and PostgreSQL.
-
-### Key Contributions
-
-* Integrated Gemini 2.5 Flash for adaptive AI-generated assessments.
-* Built Linux sandbox environments using VMs and Docker for hands-on evaluations.
-* Designed secure self-destructing lab environments.
-* Developed AI-powered behavioral and technical simulation workflows.
-* Contributed toward:
-
-  * 60% improvement in quality hiring
-  * 35% improvement in cloud support operational metrics
-
-### Cloud Assist as a Service (CaaS) – Agentic GCP Operations Platform
-
-Designed a portfolio of specialized Google Cloud support agents that collaborate through Agent2Agent (A2A) orchestration to handle research, diagnostics, and remediation workflows.
-
-### Key Contributions
-
-* Architected agentic workflows using Vertex AI, Gemini, Google ADK, Agent Builder, and Agent Harness.
-* Implemented safe execution patterns with human-in-the-loop approvals, OPA/Rego policy controls, Model Armor, and Workload Identity Federation.
-* Built retrieval and grounding pipelines using Cloud Storage, BigQuery, Spanner Graph, Vertex AI Search, and RAG.
-* Developed agent services and operational dashboards using Python, FastAPI, Angular, PostgreSQL, and Pub/Sub.
-* Designed zero-trust execution boundaries for privileged support actions across GCP environments.
-* Automated infrastructure provisioning and agent deployment using Terraform and CI/CD pipelines.
-
-### Elevate 360 – LLM Performance Intelligence Platform
-
-Designed and built an LLM evaluation and performance intelligence platform for comparing models, prompts, and retrieval strategies across quality, latency, and cost.
-
-### Key Contributions
-
-* Built evaluation pipelines covering prompt quality, LLM-as-judge scoring, regression testing, bias checks, and safety evaluation.
-* Implemented model comparison across Vertex AI, Gemini, Ollama, vLLM, Hugging Face, and hosted providers.
-* Developed RAG evaluation workflows covering retrieval quality, groundedness, and context relevance.
-* Created prompt optimization and fine-tuning workflows with performance gating before production rollout.
-* Built the platform using Next.js, FastAPI, PostgreSQL, Redis, and containerized model runtimes.
-
-### AI Technical Interviewer
-
-Designed a real-time AI technical interviewing platform combining conversational AI, speech processing, and structured candidate evaluation.
-
-### Key Contributions
-
-* Built low-latency audio interview workflows using WebSocket streaming, WebRTC, and MediaPipe.
-* Implemented RAG-based question generation and rubric-driven technical evaluation.
-* Designed candidate analytics covering communication, problem-solving, and technical depth.
-* Developed the application using Next.js, FastAPI, PostgreSQL, and containerized AI services.
-
----
-
-## Google Operations Center ( Alphabet )
+## Google Operations Center (Alphabet)
 
 ### Technical Lead
 
 📅 Oct 2021 – Aug 2024 | Hyderabad
 
-### Key Contributions
-
-* Led and mentored 30 cloud engineers handling complex GCP support operations.
-* Guided enterprise customers on cloud security and scalable GCP architecture.
-* Led automation initiatives focused on operational optimization and FTE savings.
-* Managed stakeholder reviews, reporting, and operational governance.
-* Worked extensively with IAM, networking, Kubernetes, and cloud operations.
-
----
+* Owned delivery operations for Google Cloud Platform technical support, leading 30 engineers across four technical shards: Network, Platform, Infrastructure and Data.
+* Coordinated support functions with a combined headcount of four across Quality Assurance (QA), Learning & Development (L&D) and Queue Management (QM).
+* Managed contractual service-delivery performance across Customer Effort Score (CES), SLA compliance, Time to Mitigate (TTM), quality and productivity.
+* Helped elevate the support operation from Silver to Platinum—the highest level of cloud support—within one year through delivery leadership and improvements in quality of service.
+* Handled enterprise customer cases requiring architectural guidance and owned critical escalations.
 
 ## Cisco Systems
 
 ### Technical Solution Architect
 
 📅 Oct 2017 – Oct 2021 | Chennai
-
-### Key Contributions
 
 * Led DevOps engineering for Webex-related deployments.
 * Built CI/CD workflows using CloudBees Jenkins.
@@ -214,22 +130,16 @@ Designed a real-time AI technical interviewing platform combining conversational
 * Implemented Terraform and Ansible automation workflows.
 * Configured Envoy and Consul-based infrastructure.
 
----
-
 ## SecureKloud (8K Miles)
 
 ### Lead Cloud Engineer
 
 📅 May 2016 – Sep 2017 | Chennai
 
-### Key Contributions
-
 * Built AWS automation workflows using Python (Boto2).
 * Developed CloudWatch dashboards and Lambda automation.
 * Managed logging and auditing solutions.
 * Supported secure and scalable cloud infrastructure operations.
-
----
 
 ## Qruize Technologies
 
@@ -237,22 +147,16 @@ Designed a real-time AI technical interviewing platform combining conversational
 
 📅 Jun 2015 – May 2016 | Chennai
 
-### Key Contributions
-
 * Supported hybrid cloud management systems based on CliQr.
 * Managed migrations from on-premises infrastructure to AWS.
 * Supported OpenStack (Juno) deployments.
 * Provided L2/L3 support for VPN and VPC networking issues.
-
----
 
 ## Real Image
 
 ### Senior Technical Support Engineer
 
 📅 Feb 2011 – Oct 2014 | Chennai
-
-### Key Contributions
 
 * Managed 100+ Unix/Linux servers.
 * Performed RHEL patching and Linux administration.
@@ -261,13 +165,53 @@ Designed a real-time AI technical interviewing platform combining conversational
 
 ---
 
+# SELECTED PROJECTS
+
+## CORE — AI-powered technical assessment platform
+
+Status: Production
+Period: 2025 – Present
+Context: Cognizant Technology Solutions
+
+* Led architecture and engineering delivery of a practical technical assessment platform that evaluates candidates in live technical environments and introduces a pre-onboarding quality gate.
+* CORE identified 26 of 124 interview-cleared candidates as unsuitable before project onboarding.
+* Reduced training from 8 weeks to 6 weeks (25%) and improved technical delivery quality.
+
+### Technologies
+
+* Gemini 2.5 Flash
+* Angular
+* PostgreSQL
+* Docker
+* Linux
+
+## E360 — LLM Performance Intelligence Platform
+
+Status: PoC
+Period: 2025 – Present
+Context: Cognizant Technology Solutions
+
+## Digital SME — Proactive Intelligence Workflow
+
+Status: PoC
+Period: 2025 – Present
+Context: Cognizant Technology Solutions
+
+## AI Technical Interviewer
+
+Status: PoC
+Period: 2025 – Present
+Context: Cognizant Technology Solutions
+
+---
+
 # CERTIFICATIONS
 
-* Google Cloud Professional Cloud Architect
-* Google Cloud Professional Cloud Security Engineer
-* Google Cloud Professional Cloud DevOps Engineer
-* AWS Certified Solutions Architect – Professional
-* HashiCorp Terraform Associate
+* Google Cloud Professional Cloud Security Engineer — Active (2025–2027)
+* Google Cloud Professional Cloud Architect — Active through 2026
+* Google Cloud Professional Cloud DevOps Engineer — Expired (2022–2024)
+* AWS Certified Solutions Architect – Professional — Expired (2021–2023)
+* HashiCorp Certified: Terraform Associate — Expired (2024–2026)
 
 ---
 
@@ -276,8 +220,6 @@ Designed a real-time AI technical interviewing platform combining conversational
 ## Bachelor of Engineering – Electronics & Communication
 
 Francis Xavier Engineering College
-
-Engineering degree in a related technical field for Computer Science, platform, and cloud roles.
 
 ---
 
@@ -294,6 +236,8 @@ Engineering degree in a related technical field for Computer Science, platform, 
 # ADDITIONAL AI INFRASTRUCTURE EXPERIENCE
 
 ## Local AI Infrastructure & Automation Lab
+
+Context: Personal lab
 
 Built a personal AI engineering environment integrating:
 
@@ -313,20 +257,3 @@ Built a personal AI engineering environment integrating:
 * Python
 * Shell scripting
 * Local LLMs
-
----
-
-# TARGET ROLE ALIGNMENT
-
-* Senior Cloud Architect
-* Platform Engineer
-* DevOps Engineer
-* AI Infrastructure Engineer
-* Engineering Manager
-* Cloud Operations Leader
-
----
-
-# ATS KEYWORDS
-
-Cloud Architecture, Kubernetes, Docker, Terraform, DevOps, CI/CD, Jenkins, Infrastructure as Code, Platform Engineering, GCP, AWS, Cloud Run, Linux, Python, Automation, SRE, Cloud Security, IAM, Networking, AI Infrastructure, Vertex AI, Gemini Enterprise, Generative AI, LLM, Agentic AI, Agent2Agent, A2A, RAG, Model Armor, OPA, FastAPI, PostgreSQL, BigQuery, Pub/Sub, Cloud Operations, Engineering Leadership

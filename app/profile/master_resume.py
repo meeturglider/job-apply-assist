@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any, cast
 
 from app.models import (
     CandidateProfile,
@@ -37,6 +38,7 @@ DATE_RE = re.compile(
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 PHONE_RE = re.compile(r"\+?\d[\d\s-]{7,}\d")
 LINKEDIN_RE = re.compile(r"https?://(?:www\.)?linkedin\.com/in/[^\s)\]]+", re.IGNORECASE)
+URL_RE = re.compile(r"https?://[^\s)\]>]+", re.IGNORECASE)
 BULLET_RE = re.compile(r"^\s*[*-]\s+(?P<text>.+?)\s*$")
 
 
@@ -89,6 +91,17 @@ def _extract_identity(lines: list[str]) -> Identity:
             match = LINKEDIN_RE.search(stripped)
             if match:
                 identity.linkedin = match.group(0)
+        for url in URL_RE.findall(stripped):
+            normalized = url.rstrip(".,")
+            lowered = normalized.casefold()
+            if "linkedin.com" in lowered:
+                if not identity.linkedin:
+                    identity.linkedin = normalized
+            elif "github.com" in lowered:
+                if not identity.github:
+                    identity.github = normalized
+            elif not identity.portfolio:
+                identity.portfolio = normalized
         if not identity.phone and ("📞" in stripped or PHONE_RE.search(stripped)):
             match = PHONE_RE.search(stripped)
             if match:
@@ -268,37 +281,66 @@ def _parse_education(lines: list[str]) -> list[EducationEntry]:
     return []
 
 
-def _parse_ai_lab(lines: list[str]) -> ProjectEntry | None:
-    name = "Local AI Infrastructure & Automation Lab"
-    bullets: list[str] = []
-    technologies: list[str] = []
+def _parse_projects(lines: list[str], *, default_context: str = "") -> list[ProjectEntry]:
+    projects: list[ProjectEntry] = []
+    current: dict[str, Any] | None = None
     in_tech = False
+
+    def flush() -> None:
+        nonlocal current
+        if current is None:
+            return
+        name = str(current.get("name", "")).strip()
+        if name:
+            summary_parts = cast(list[str], current.get("summary_parts", []))
+            projects.append(
+                ProjectEntry(
+                    name=name,
+                    context=str(current.get("context") or default_context).strip(),
+                    period=str(current.get("period") or "").strip(),
+                    status=str(current.get("status") or "").strip(),
+                    summary=" ".join(summary_parts).strip(),
+                    bullets=_dedupe(cast(list[str], current.get("bullets", []))),
+                    technologies=_dedupe(cast(list[str], current.get("technologies", []))),
+                    sources=["MASTER_RESUME.md"],
+                )
+            )
+        current = None
+
     for line in lines:
         stripped = line.strip()
         if not stripped or stripped == "---":
             continue
-        if stripped.startswith("#"):
-            heading = stripped.lstrip("#").strip()
-            if heading.casefold().startswith("technologies"):
-                in_tech = True
-            elif stripped.startswith("## "):
-                name = heading
+        if stripped.startswith("## "):
+            flush()
+            current = {
+                "name": stripped[3:].strip(),
+                "bullets": [],
+                "technologies": [],
+                "summary_parts": [],
+            }
+            in_tech = False
             continue
+        if current is None:
+            continue
+        if stripped.startswith("### "):
+            in_tech = stripped[4:].strip().casefold().startswith("technolog")
+            continue
+        if ":" in stripped and not stripped.startswith(("*", "-")):
+            key, value = stripped.split(":", 1)
+            if key.strip().casefold() in {"status", "period", "context"}:
+                current[key.strip().casefold()] = value.strip()
+                continue
         bullet = BULLET_RE.match(line)
-        if bullet and not in_tech:
-            bullets.append(_clean_bullet(bullet.group("text")))
-        elif bullet and in_tech:
-            technologies.append(_clean_bullet(bullet.group("text")))
-    if not bullets and not technologies:
-        return None
-    return ProjectEntry(
-        name=name,
-        context="Personal lab",
-        summary="Personal AI engineering environment for local LLM and workflow experimentation.",
-        bullets=_dedupe(bullets),
-        technologies=_dedupe(technologies),
-        sources=["MASTER_RESUME.md"],
-    )
+        if bullet:
+            text = _clean_bullet(bullet.group("text"))
+            if text:
+                target = "technologies" if in_tech else "bullets"
+                cast(list[str], current.setdefault(target, [])).append(text)
+            continue
+        cast(list[str], current.setdefault("summary_parts", [])).append(stripped)
+    flush()
+    return projects
 
 
 def parse_master_resume(path: Path) -> CandidateProfile:
@@ -313,10 +355,13 @@ def parse_master_resume(path: Path) -> CandidateProfile:
     education = _parse_education(sections.get("education", []))
     awards = _parse_awards(sections.get("awards", []))
 
-    projects: list[ProjectEntry] = []
-    ai_lab = _parse_ai_lab(sections.get("additional ai infrastructure experience", []))
-    if ai_lab:
-        projects.append(ai_lab)
+    projects = _parse_projects(sections.get("selected projects", []))
+    projects.extend(
+        _parse_projects(
+            sections.get("additional ai infrastructure experience", []),
+            default_context="Personal lab",
+        )
+    )
 
     summary = " ".join(
         line.strip()

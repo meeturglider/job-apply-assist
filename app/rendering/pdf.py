@@ -21,11 +21,21 @@ async def render_pdf(html: str, output_path: Path) -> Path:
                 page = await browser.new_page()
                 await page.set_content(html, wait_until="load")
                 await page.emulate_media(media="print")
+                header_template = "<div></div>"
+                footer_template = (
+                    "<div style='font-family:Arial,sans-serif;font-size:8pt;color:#6b7280;"
+                    "text-align:center;width:100%;'>Page "
+                    "<span class='pageNumber'></span> of "
+                    "<span class='totalPages'></span></div>"
+                )
                 await page.pdf(
                     path=str(output_path),
                     format="A4",
                     print_background=True,
                     prefer_css_page_size=True,
+                    display_header_footer=True,
+                    header_template=header_template,
+                    footer_template=footer_template,
                 )
             finally:
                 await browser.close()

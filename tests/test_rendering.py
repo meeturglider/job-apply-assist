@@ -61,3 +61,9 @@ def test_renders_markdown_html_and_docx(profile: CandidateProfile, tmp_path: Pat
     checks = check_docx(resume, target)
     assert checks
     assert all(check.passed for check in checks)
+
+
+def test_renders_extractable_role_and_contact_separators(profile: CandidateProfile) -> None:
+    html = resume_html(_resume(profile))
+    assert '<span class="inline-sep"> | </span>' in html
+    assert 'content: " | "' in html

@@ -60,6 +60,8 @@ class MemoryProfileService:
         return profile
 
     async def _load_portfolio(self, refresh: bool) -> PortfolioSnapshot | None:
+        if not self.settings.portfolio_enabled:
+            return None
         if self.portfolio is not None and not refresh:
             return self.portfolio
         with TemporaryDirectory(prefix="job-assist-portfolio-") as directory:

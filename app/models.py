@@ -381,6 +381,7 @@ class ResumeProject(BaseModel):
     name: str
     context: str = ""
     period: str = ""
+    status: str = ""
     bullets: list[str] = Field(default_factory=list)
     technologies: list[str] = Field(default_factory=list)
 

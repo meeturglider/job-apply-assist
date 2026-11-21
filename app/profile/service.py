@@ -33,22 +33,22 @@ class ProfileService:
         extra_urls: list[str] | None = None,
     ) -> CandidateProfile:
         max_age = 0 if refresh else self.settings.portfolio_cache_seconds
-        portfolio: PortfolioSnapshot | None
-        try:
-            portfolio = await load_portfolio(
-                self.settings.portfolio_base_url,
-                self.cache_path,
-                max_age,
-                self.settings.user_agent,
-            )
-        except Exception as exc:
-            portfolio = None
-            fallback = self._load_cached_portfolio()
-            if fallback is not None:
-                portfolio = fallback
-                portfolio.payload.setdefault("warnings", []).append(
-                    f"Portfolio refresh failed; using cached snapshot. {exc}"
+        portfolio: PortfolioSnapshot | None = None
+        if self.settings.portfolio_enabled:
+            try:
+                portfolio = await load_portfolio(
+                    self.settings.portfolio_base_url,
+                    self.cache_path,
+                    max_age,
+                    self.settings.user_agent,
                 )
+            except Exception as exc:
+                fallback = self._load_cached_portfolio()
+                if fallback is not None:
+                    portfolio = fallback
+                    portfolio.payload.setdefault("warnings", []).append(
+                        f"Portfolio refresh failed; using cached snapshot. {exc}"
+                    )
 
         master_path = self.active_resume_path
         if not master_path.exists():

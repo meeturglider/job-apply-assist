@@ -60,7 +60,9 @@ def resume_markdown(resume: TailoredResume) -> str:
         lines.extend(["## Selected Projects", ""])
         for project in resume.projects:
             lines.append(f"### {project.name}")
-            meta = " | ".join(value for value in [project.context, project.period] if value)
+            meta = " | ".join(
+                value for value in [project.context, project.status, project.period] if value
+            )
             if meta:
                 lines.append(meta)
             for bullet in project.bullets:

@@ -74,6 +74,8 @@ def test_tailoring_prompt_locks_google_style() -> None:
     assert "simple single-column structure" in prompt
     assert "without inventing one" in prompt
     assert "Merge multiple roles at the same company" in prompt
+    assert "Preserve the skill group names" in prompt
+    assert "Keep every certification" in prompt
 
 
 def test_same_company_roles_merge_into_one_rendered_entry(profile: CandidateProfile) -> None:

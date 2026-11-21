@@ -157,6 +157,7 @@ def _llm_projects(
                     name=source.name,
                     context=source.context,
                     period=source.period,
+                    status=source.status,
                     bullets=bullets,
                     technologies=source.technologies[:8],
                 )

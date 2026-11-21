@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.models import CandidateProfile
 
 
@@ -37,7 +39,62 @@ def test_duration_warning_is_raised_when_text_is_stale(master_text: str) -> None
     assert any("hardcoded experience duration" in warning for warning in profile.warnings)
 
 
-def test_award_merge_dedupes_near_duplicate_variants() -> None:
+def test_parses_profile_links_and_project_status() -> None:
+    from app.profile.master_resume import parse_master_resume_text
+
+    text = """# Test Candidate
+## Senior Cloud Architect
+- test@example.com
+- https://www.linkedin.com/in/test | https://github.com/test | https://example.dev
+
+# Professional Experience
+
+## Example Corp
+
+### Senior Cloud Architect
+Jan 2024 – Present | Remote
+- Led architecture delivery.
+
+# Selected Projects
+
+## CORE — Assessment Platform
+
+Status: Production
+Period: 2025 – Present
+Context: Example Corp
+
+- Led delivery of CORE.
+
+### Technologies
+
+* Python
+"""
+    profile = parse_master_resume_text(text)
+    assert profile.identity.github == "https://github.com/test"
+    assert profile.identity.portfolio == "https://example.dev"
+    assert profile.projects[0].name == "CORE — Assessment Platform"
+    assert profile.projects[0].status == "Production"
+    assert profile.projects[0].period == "2025 – Present"
+    assert profile.projects[0].context == "Example Corp"
+    assert profile.projects[0].technologies == ["Python"]
+
+
+def test_portfolio_can_be_disabled(tmp_path: Path) -> None:
+    import asyncio
+
+    from app.config import Settings
+    from app.profile.memory_service import MemoryProfileService
+
+    assert Settings().portfolio_enabled is True
+    service = MemoryProfileService(
+        Settings(
+            portfolio_enabled=False,
+            data_dir=tmp_path,
+            master_resume_path=tmp_path / "resume.md",
+        )
+    )
+    assert asyncio.run(service._load_portfolio(refresh=True)) is None
+
     from app.profile.merge import _merge_awards
 
     merged = _merge_awards(

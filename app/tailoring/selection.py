@@ -364,6 +364,7 @@ def deterministic_projects(profile: CandidateProfile, job: JobDescription) -> li
                 name=project.name,
                 context=project.context,
                 period=project.period,
+                status=project.status,
                 bullets=bullets,
                 technologies=project.technologies[:8],
             )

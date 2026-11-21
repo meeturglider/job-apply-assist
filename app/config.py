@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     nlp_threshold: float = Field(default=0.4, ge=0, le=1)
 
     master_resume_path: Path = Path("MASTER_RESUME.md")
+    portfolio_enabled: bool = True
     portfolio_base_url: str = "https://hari.is-a.dev"
     portfolio_cache_seconds: int = 3600
 

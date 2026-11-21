@@ -480,6 +480,7 @@ def sanitize_resume(
                 name=project_source.name,
                 context=project_source.context,
                 period=project_source.period,
+                status=project_source.status,
                 bullets=bullets,
                 technologies=project_source.technologies[:8],
             )

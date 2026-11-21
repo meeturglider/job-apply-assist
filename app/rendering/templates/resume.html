@@ -20,12 +20,17 @@
       background: #ffffff;
       font-family: Arial, Helvetica, sans-serif;
       font-size: 9.8pt;
-      line-height: 1.27;
+      line-height: 1.31;
+    }
+
+    body,
+    body * {
+      font-family: Arial, Helvetica, sans-serif;
     }
 
     .header {
       text-align: center;
-      margin-bottom: 7px;
+      margin-bottom: 8px;
     }
 
     .name {
@@ -38,7 +43,7 @@
 
     .headline {
       margin: 2px 0 0;
-      font-size: 10.6pt;
+      font-size: 10.2pt;
       color: #1f2937;
       font-weight: 600;
     }
@@ -62,8 +67,8 @@
     }
 
     .contact li + li::before {
-      content: "|";
-      margin: 0 6px;
+      content: " | ";
+      margin: 0 2px;
       color: #9ca3af;
     }
 
@@ -73,14 +78,14 @@
     }
 
     section {
-      margin-top: 7px;
+      margin-top: 10px;
     }
 
     h2 {
-      margin: 0 0 3px;
-      padding-bottom: 1.5px;
+      margin: 0 0 4px;
+      padding-bottom: 2px;
       border-bottom: 1px solid #374151;
-      font-size: 9.5pt;
+      font-size: 9.8pt;
       line-height: 1.2;
       letter-spacing: 0.8px;
       text-transform: uppercase;
@@ -98,15 +103,16 @@
     }
 
     .skill-row {
-      margin: 0 0 1px;
+      margin: 0 0 2px;
     }
 
     .skill-category {
-      font-weight: 700;
+      color: #374151;
+      font-weight: 600;
     }
 
     .entry {
-      margin-bottom: 5px;
+      margin-bottom: 8px;
       break-inside: auto;
       page-break-inside: auto;
     }
@@ -129,26 +135,26 @@
     }
 
     .role {
-      font-size: 9.9pt;
+      font-size: 9.8pt;
       font-weight: 700;
     }
 
     .dates {
-      font-size: 9pt;
+      font-size: 9.8pt;
       color: #374151;
       white-space: nowrap;
     }
 
     .company {
-      font-size: 9.2pt;
+      font-size: 9.8pt;
       color: #374151;
-      margin-top: 1px;
+      margin-top: 2px;
     }
 
     .company-major {
-      font-size: 9.9pt;
+      font-size: 9.8pt;
       font-weight: 700;
-      margin-top: 1px;
+      margin-top: 2px;
     }
 
     .role-line {
@@ -156,29 +162,34 @@
       justify-content: space-between;
       gap: 12px;
       align-items: baseline;
-      margin-top: 1px;
+      margin-top: 2px;
     }
 
     .role-name {
-      font-size: 9.5pt;
+      font-size: 9.8pt;
       font-weight: 600;
     }
 
+    .inline-sep {
+      color: #9ca3af;
+      font-weight: 400;
+    }
+
     ul {
-      margin: 2px 0 0;
+      margin: 3px 0 0;
       padding-left: 15px;
     }
 
     li {
-      margin: 0 0 1px;
+      margin: 0 0 2px;
       padding-left: 1px;
       break-inside: avoid;
       page-break-inside: avoid;
     }
 
     .tech {
-      margin-top: 1px;
-      font-size: 8.9pt;
+      margin-top: 2px;
+      font-size: 9.8pt;
       color: #374151;
     }
 
@@ -196,7 +207,7 @@
     .cert-list li,
     .education-list li,
     .award-list li {
-      margin-bottom: 1px;
+      margin-bottom: 2px;
     }
 
     @media screen {
@@ -258,13 +269,13 @@
       {% if entry.location %}<p class="company">{{ entry.location }}</p>{% endif %}
       {% for role in entry.roles %}
       <div class="role-line">
-        <span class="role-name">{{ role.role }}</span>
+        <span class="role-name">{{ role.role }}<span class="inline-sep"> | </span></span>
         <span class="dates">{{ date_range(role.start, role.end) }}</span>
       </div>
       {% endfor %}
       {% else %}
       <div class="entry-head">
-        <span class="role">{{ entry.role }}</span>
+        <span class="role">{{ entry.role }}<span class="inline-sep"> | </span></span>
         <span class="dates">{{ date_range(entry.start, entry.end) }}</span>
       </div>
       <p class="company">{{ [entry.company, entry.location]|select|join(' | ') }}</p>
@@ -285,10 +296,10 @@
     {% for project in resume.projects %}
     <div class="entry">
       <div class="entry-head">
-        <span class="role">{{ project.name }}</span>
+        <span class="role">{{ project.name }}<span class="inline-sep"> | </span></span>
         <span class="dates">{{ project.period }}</span>
       </div>
-      {% if project.context %}<p class="company">{{ project.context }}</p>{% endif %}
+      {% if project.context or project.status %}<p class="company">{{ [project.context, project.status]|select|join(' — ') }}</p>{% endif %}
       {% if project.bullets %}
       <ul>
         {% for bullet in project.bullets %}<li>{{ bullet }}</li>{% endfor %}

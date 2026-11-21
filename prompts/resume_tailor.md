@@ -24,7 +24,7 @@ Return one compact JSON object with exactly these fields:
     }
   ],
   "projects": [
-    {"name": "project", "context": "context", "period": "period", "bullets": ["bullet"], "technologies": ["technology"]}
+    {"name": "project", "context": "context", "period": "period", "status": "Production or PoC", "bullets": ["bullet"], "technologies": ["technology"]}
   ],
   "certifications": ["certification"],
   "education": ["degree, institution"],
@@ -37,7 +37,7 @@ Hard rules:
 - Never add a missing skill to the resume. Missing skills stay missing.
 - You may reorder, select, condense, and rephrase existing facts.
 - Mirror the job's terminology only when the profile supports the claim.
-- Keep every employment entry, but condense older roles to exactly 1 bullet.
+- Keep every employment entry; condense older roles to at most 2 verified bullets.
 - Merge multiple roles at the same company into one company block with each role and its date range listed once.
 - Recent roles should have at most 3-4 concise bullets. Put the most job-relevant evidence first.
 - Keep the resume to one page for early-career profiles; use two only when strong relevant depth requires it.
@@ -45,9 +45,12 @@ Hard rules:
 - Prefer sourced numbers for Y, such as percentages, dollars, latency, throughput, users, requests/day, team size, or budget. If the source has no number, use a concrete outcome without inventing one.
 - Write achievement bullets in past tense with an action, the technology, and the outcome when the source provides one.
 - Put the most relevant skills and programming languages near the top; keep every skill supported by the profile.
+- Preserve the skill group names and groupings from the profile when present; do not merge all skills into one group.
 - Use a simple single-column structure with consistent spacing. Do not use tables, columns, photos, icons, or graphics.
 - Do not include first-person pronouns.
 - Preserve exact dates and titles from the profile.
 - Use only certifications and education present in the profile.
-- Select at most 2 projects, and only when they are relevant to the job.
+- Keep every certification present in the profile.
+- Select at most 3 projects, and only when they are relevant to the job.
+- Preserve each project's status (for example, Production or PoC) exactly as supplied in the profile, and include relevant PoC-labelled initiatives.
 - Skills must be grouped and ordered by relevance to the job.
